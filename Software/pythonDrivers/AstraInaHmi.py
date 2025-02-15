@@ -27,47 +27,47 @@ def formatEnergie(energie):
 
 
 class ina219Frame(QFrame):
-    def __init__(self, ina219, parent=None):
+    def __init__(self, ina219:AstraIna, parent=None):
         super().__init__(parent)
-        self.ina219 = ina219
+        self.ina219:AstraIna = ina219
         #self.setStyleSheet("border: 1px solid black;") 
         
-        label = QLabel(self.ina219.get_name(), parent=self) 
+        label = QLabel(self.ina219.getName(), parent=self) 
         label.setAlignment(Qt.AlignCenter)        
         label.adjustSize()
         # Voltage
-        self.textVoltage = dataMenu("Tension", "V", parent=self)
-        self.textVoltage.setFixedWidth(80,70,50)
-        self.textVoltage.setReadOnly(True)
+        self.textVoltageV:dataMenu = dataMenu("Tension", "V", parent=self)
+        self.textVoltageV.setFixedWidth(80,70,50)
+        self.textVoltageV.setReadOnly(True)
 
         # Current 
-        self.textCurrent = dataMenu("Courant", "mA", parent=self)
-        self.textCurrent.setFixedWidth(80,70,50)
-        self.textCurrent.setReadOnly(True)
+        self.textCurrentA:dataMenu = dataMenu("Courant", "mA", parent=self)
+        self.textCurrentA.setFixedWidth(80,70,50)
+        self.textCurrentA.setReadOnly(True)
 
         # PowerQT
-        self.textEnergie = dataMenu("Energie", "Ah", parent=self)
-        self.textEnergie.setFixedWidth(80,70,50)
-        self.textEnergie.setReadOnly(True)
+        self.textEnergieWH:dataMenu = dataMenu("Energie", "Wh", parent=self)
+        self.textEnergieWH.setFixedWidth(80,70,50)
+        self.textEnergieWH.setReadOnly(True)
 
         # Integration Time
-        self.intPeriod = dataMenu("IntPeriod", "s", parent=self)
+        self.intPeriod:dataMenu = dataMenu("IntPeriod", "s", parent=self)
         self.intPeriod.setFixedWidth(80,70,50)
         self.intPeriod.setReadOnly(True)
 
-        self.styleElement = "background: transparent; background-color: transparent; border: none; color: black;"
-        self.textVoltage.setStyleSheet(self.styleElement)
-        self.textCurrent.setStyleSheet(self.styleElement)
-        self.textEnergie.setStyleSheet(self.styleElement)
+        self.styleElement:str = "background: transparent; background-color: transparent; border: none; color: black;"
+        self.textVoltageV.setStyleSheet(self.styleElement)
+        self.textCurrentA.setStyleSheet(self.styleElement)
+        self.textEnergieWH.setStyleSheet(self.styleElement)
         self.intPeriod.setStyleSheet(self.styleElement)
 
         layout = QVBoxLayout()
         layout.setSpacing(0)
         layout.setContentsMargins(0,0,0,0)
         layout.addWidget(label)
-        layout.addWidget(self.textVoltage)
-        layout.addWidget(self.textCurrent)
-        layout.addWidget(self.textEnergie)
+        layout.addWidget(self.textVoltageV)
+        layout.addWidget(self.textCurrentA)
+        layout.addWidget(self.textEnergieWH)
         layout.addWidget(self.intPeriod)
         layout.setSpacing(0)
         #layout.setContentsMargins(1, 1, 1, 1)  # Set the margins inside the frame
@@ -76,36 +76,39 @@ class ina219Frame(QFrame):
         self.setStyleSheet("border: 1px solid black;") 
 
     def update_text_fields(self):
-        bus_voltage = self.ina219.voltage()
-        current = self.ina219.current()
-        intPeriods = int(self.ina219.intPeriod())
+        intPeriods = int(self.ina219.intPeriodS())
         intPeriodm = int(intPeriods/60)
         intPeriods %= 60
         intPeriodh = int(intPeriodm/60)
         intPeriodm %= 60
 
-        self.textVoltage.setText(f"{bus_voltage:+.1f}")
-        self.textCurrent.setText(f"{current:+.1f}")
-        self.textEnergie.setText(formatEnergie(self.ina219.energie()/3600/1000))
+        self.textVoltageV.setText(f"{self.ina219.voltageV():+.1f}")
+        self.textCurrentA.setText(f"{self.ina219.currentA():+.1f}")
+        self.textEnergieWH.setText(formatEnergie(self.ina219.energiemWS()/3600/1000))
         self.intPeriod.setText(f"{intPeriodh:2d}:{intPeriodm:2d}:{intPeriods:2d}")
 
-    def get_totalEnergieAh(self):
-        return self.ina219.get_totalEnergie()/3600/1000
+    def getTotalEnergieWh(self):
+        return self.ina219.getTotalEnergiemWS()/3600/1000
 
 class MainInaWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-
 
         # Layout de type grille
         self.main_layout = QGridLayout()
         self.main_layout.setSpacing(0)
 
         # Add QLabel at the top
-        self.TotalEnergie = dataMenu(" Total Energie = ", "Ah ", parent=self)
-        self.TotalEnergie.setReadOnly(True)
-        self.TotalEnergie.setStyleSheet("border: 1px solid black;") 
-        self.main_layout.addWidget(self.TotalEnergie, 0, 1)
+        self.TotalEnergieWh:dataMenu = dataMenu(" Total Energie = ", "Wh ", parent=self)
+        self.TotalEnergieWh.setReadOnly(True)
+        self.TotalEnergieWh.setStyleSheet("border: 1px solid black;") 
+
+        self.TotalEnergieAh:dataMenu = dataMenu(" Total Ah sous 12V = ", "Ah ", parent=self)
+        self.TotalEnergieAh.setReadOnly(True)
+        self.TotalEnergieAh.setStyleSheet("border: 1px solid black;") 
+
+        self.main_layout.addWidget(self.TotalEnergieWh, 0, 1)
+        self.main_layout.addWidget(self.TotalEnergieAh, 0, 2)
 
 
         self.widgets = []
@@ -132,7 +135,8 @@ class MainInaWindow(QWidget):
         self.timer.start(1000)  # Met à jour toutes les 1000 millisecondes (1 seconde)
  
     def  update_text_fields(self):
-        self.TotalEnergie.setText(formatEnergie(self.widgets[1].get_totalEnergieAh()))
+        self.TotalEnergieWh.setText(formatEnergie(self.widgets[1].getTotalEnergieWh()))
+        self.TotalEnergieAh.setText(formatEnergie(self.widgets[1].getTotalEnergieWh()/12))
   
         for widget in self.widgets:
             widget.update_text_fields() 

@@ -13,8 +13,8 @@ class AstraInaFetcher(threading.Thread):
         super().__init__()
         self.running = True
         self.listInalock = threading.Lock()
-        self.listIna = []
-        self.totalEnergie=0
+        self.listIna:list = []
+        self.totalEnergiemWS:float=0
 
     @classmethod
     def get_instance(cls):
@@ -31,50 +31,32 @@ class AstraInaFetcher(threading.Thread):
 
     def run(self):
         while self.running:
+            ina:AstraIna=None
+            listIna:list=None
             time.sleep(0.4)
             with self.listInalock:
-                for ina in self.listIna:
-                    ina["configured"] = False
-                    if ina["ina219"].ping():
-                        ina["pinged"]=True
-                        if ina["NotYetPing"]:
-                            ina["lasttime"] = time.perf_counter()
-                            ina["firstttime"] = time.perf_counter()
-                            ina["NotYetPing"]=False
-
-                    if  ina["pinged"]:
-                        ina["ina219"].configure(voltage_range=ina["voltage_range"], gain=ina["gain"], bus_adc=ina["bus_adc"], shunt_adc=ina["shunt_adc"])
-                        ina["configured"] = True
-
-                time.sleep(0.1)
-                for ina in self.listIna:
-                    if ina["configured"]:
-                        curtime=time.perf_counter()
-                        deltatime=curtime-ina["lasttime"]
-                        ina["shunt_voltage"] = ina["ina219"].shunt_voltage()
-                        ina["voltage"] = ina["ina219"].voltage()
-                        ina["current"] = ina["ina219"].current()
-                        ina["power"] = ina["ina219"].power()
-                        energie=ina["power"] * deltatime
-                        ina["energie"] += energie
-                        self.totalEnergie += energie
-                        ina["lasttime"]=curtime
-                        ina["intPeriod"]=curtime-ina["firstttime"]
-                    #print(ina["address"]," voltage", ina["voltage"])
+                listIna=self.listIna
+            totalEnergiemWS:float=0.0
+            for ina in listIna:
+                ina.update()
+                totalEnergiemWS+=ina.energiemWS()
+                #print(ina["address"]," voltage", ina["voltage"])
+            self.totalEnergiemWS=totalEnergiemWS
 
     def stop(self):
         self.running=False
         self.join()
         AstraIna._AstraInaFetcher=None
 
-    def set_ina(self, ina):
-        ina["pinged"]=False
-        ina["NotYetPing"]=True
+    def setIna(self, ina):
         with self.listInalock:
             self.listIna.append(ina)
 
-    def get_totalEnergie(self):
-        return self.totalEnergie
+    def getTotalEnergiemWS(self)->float:
+        """
+        Return the sum of INA energie measurements in mWs.
+        """
+        return self.totalEnergiemWS
 
 
 class AstraIna:
@@ -124,65 +106,149 @@ class AstraIna:
         AstraInaFetcher.exitAll()
 
     def __init__(self, shunt_ohms=-1, max_expected_amps=-1, busnum=-1, address=-1, name="", log_level=logging.ERROR):
-        self.ina219 = {"configured":False, "lasttime":0, "firsttime":0, "address":address, "voltage":0, "shunt_voltage":0, "current":0, "power":0, "energie":0, "intPeriod":0}
-        if name == "":
+        self.configured:bool=False
+        self.configurationSend:bool=False
+
+        self.name:str=name
+        # Caracteristiques
+        self.address=address
+        self.voltage_range=-1
+        self.gain=-1
+        self.bus_adc=-1
+        self.shunt_adc=-1
+                 
+        # Last collection
+        self.lasttimeS:float=0.0
+        self.firsttime:float=0.0
+        self._intPeriodS:float=0.0
+
+        self._voltageV:float=0.0
+        self._shuntVoltagemV:float=0.0
+        self._currentmA:float=0.0
+        self._powermW:float=0.0
+        self._energiemWS:float=0.0
+    
+        self.ina219:INA219= None
+        self.AstraInaFetcher:AstraInaFetcher=None
+
+        if self.name == "":
             if shunt_ohms==-1 or max_expected_amps==-1 or busnum==-1 or address==-1:
                 raise Exception("If name notspecified call AstraIna(shunt_ohms, max_expected_amps, busnum, address")
-            self.ina219["ina219"]= INA219(shunt_ohms, max_expected_amps, busnum, address, log_level)
-            self.configured=False
-            self.name="Unkown"
             # Temp fetcher
+            self.ina219 = INA219(shunt_ohms=shunt_ohms, max_expected_amps=max_expected_amps, busnum=busnum, address=address, log_level=log_level)
             self.AstraInaFetcher = AstraInaFetcher.get_instance()
         else:
-            self.name=name
-            if name in self.ina219_set:
+            if self.name in self.ina219_set:
                 self.caract=self.ina219_set[name]
-                self.ina219["ina219"]= INA219(self.caract["shunt_ohms"], self.caract["max_expected_amps"], self.caract["busnum"], self.caract["address"], log_level)
-                self.configured=False
+                self.ina219 = INA219(
+                    shunt_ohms=self.caract["shunt_ohms"], 
+                    max_expected_amps=self.caract["max_expected_amps"], 
+                    busnum=self.caract["busnum"], 
+                    address=self.caract["address"], 
+                    log_level=log_level)
                 # Temp fetcher
                 self.AstraInaFetcher = AstraInaFetcher.get_instance()
                 self.configure(bus_adc=self.caract["bus_adc"], shunt_adc=self.caract["shunt_adc"])
             else:
                 raise Exception("Unkown AstraIna")
 
-
-    def get_name(self):
-        return self.name
-
-    def set_name(self, name):
-        self.name = name
-
+    def update(self):
+        """
+        Do the INA iteraction.
+        Configure the INA if configration was set and INA responds.
+        Collects measures of the INA for publication.
+        The method is not threadsafe and shall be caulled by a uniq thread.
+        """
+        if self.configurationSend:
+            curtimeS=time.perf_counter()
+            deltatimeS=curtimeS-self.lasttimeS
+            if not(self.ina219.current_overflow()):
+                self._shuntVoltagemV = self.ina219.shunt_voltage()
+                self._voltageV = float(self.ina219.voltage())
+                self._currentmA = float(self.ina219.current())
+                self._powermW = float(self.ina219.power())
+            energiemWS=self._powermW * deltatimeS
+            self._energiemWS += energiemWS
+            self.lasttimeS=curtimeS
+            self._intPeriodS=curtimeS-self.firstttime
+        elif self.ina219.ping() and self.configured:
+            self.lasttimeS = time.perf_counter()
+            self.firstttime= time.perf_counter()
+            self.ina219.configure(
+                voltage_range=self.voltage_range, 
+                gain=self.gain, 
+                bus_adc=self.bus_adc, 
+                shunt_adc=self.shunt_adc)
+            self.configurationSend = True
+    
     def configure(self, voltage_range=INA219.RANGE_16V, gain=INA219.GAIN_AUTO, bus_adc=INA219.ADC_12BIT, shunt_adc=INA219.ADC_12BIT):
         if self.configured:
             raise Exception("AstraIna already Configured")
         else:
+            self.voltage_range=voltage_range
+            self.gain=gain
+            self.bus_adc=bus_adc
+            self.hunt_adc=shunt_adc
+            self.AstraInaFetcher.setIna(self)
             self.configured=True
-            self.ina219["voltage_range"]=voltage_range
-            self.ina219["gain"]=gain
-            self.ina219["bus_adc"]=bus_adc
-            self.ina219["shunt_adc"]=shunt_adc
-            self.AstraInaFetcher.set_ina(self.ina219)
 
-    def voltage(self):
-        return self.ina219["voltage"]
+    
+    def getName(self)->str:
+        return self.name
 
-    def shunt_voltage(self):
-        return self.ina219["shunt_voltage"]
+    def setName(self, name):
+        self.name = name
 
-    def current(self):
-        return self.ina219["current"]
+    def voltageV(self)->float:
+        """
+        Return the last seen bus voltage in volts.
+        """
+        return self.voltageV
 
-    def power(self):
-        return self.ina219["power"]
+    def shuntVoltagemV(self)->float:
+        """
+        Return the last seen shunt voltage in millivolts.
+        """
+        return self._shuntVoltagemV
 
-    def energie(self):
-        return self.ina219["energie"]
+    def currentmA(self)->float:
+        """
+        Return the bus current in milliamps.
+        """
+        return self.currentmA
 
-    def intPeriod(self):
-        return self.ina219["intPeriod"]
+    def currentA(self)->float:
+        """
+        Return the bus current in Amps.
+        """
+        return (self.currentmA/1000.0)
+    
+    def powermW(self)->float:
+        """
+        Return the bus power consumption in milliwatts.
+        """
+        return self._powermW
 
-    def get_totalEnergie(self):
-        return self.AstraInaFetcher.get_totalEnergie()    
+    def powerW(self)->float:
+        """
+        Return the bus power consumption in Watts.
+        """
+        return (self._powermW/1000.0)
+    
+    def energiemWS(self)->float:
+        """ 
+        Return Cumulated Energie cosumption in VAs Ws Joules
+        """
+        return self._energiemWS
+    
+    def intPeriodS(self)->float:
+        return self._intPeriodS
+    
+    def getTotalEnergiemWS(self)->float:
+        """
+        Return the sum of INA energie measurements in mWs.
+        """
+        return self.AstraInaFetcher.getTotalEnergiemWS()    
     
 if __name__ == "__main__":
     import signal
