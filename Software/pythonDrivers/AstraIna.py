@@ -162,7 +162,13 @@ class AstraIna:
         if self.configurationSend:
             curtimeS=time.perf_counter()
             deltatimeS=curtimeS-self.lasttimeS
-            if not(self.ina219.current_overflow()):
+            if self.ina219.current_overflow():
+                self.ina219.configure(
+                    voltage_range=self.voltage_range, 
+                    gain=self.gain, 
+                    bus_adc=self.bus_adc, 
+                    shunt_adc=self.shunt_adc)                
+            else:
                 self._shuntVoltagemV = self.ina219.shunt_voltage()
                 self._voltageV = float(self.ina219.voltage())
                 self._currentmA = float(self.ina219.current())
