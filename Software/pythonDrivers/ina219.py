@@ -307,10 +307,10 @@ class INA219:
             self._max_expected_amps)
         self._configure(voltage_range, self._gain, bus_adc, shunt_adc)
 
-    def voltage(self):
+    def voltage(self)->float:
         """Return the bus voltage in volts."""
         value = self._voltage_register()
-        return float(value) * self.__BUS_MILLIVOLTS_LSB / 1000
+        return float(float(value) * self.__BUS_MILLIVOLTS_LSB / 1000.0)
 
     def supply_voltage(self):
         """Return the bus supply voltage in volts.
