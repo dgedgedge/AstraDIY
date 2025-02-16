@@ -33,7 +33,7 @@ class AstraInaFetcher(threading.Thread):
         while self.running:
             ina:AstraIna=None
             listIna:list=None
-            time.sleep(0.4)
+            time.sleep(0.1)
             with self.listInalock:
                 listIna=self.listIna
             totalEnergiemWS:float=0.0
@@ -162,13 +162,13 @@ class AstraIna:
         if self.configurationSend:
             curtimeS=time.perf_counter()
             deltatimeS=curtimeS-self.lasttimeS
+            self.ina219.configure(
+                voltage_range=self.voltage_range, 
+                gain=self.gain, 
+                bus_adc=self.bus_adc, 
+                shunt_adc=self.shunt_adc)
+            time.sleep(0.2)              
             if self.ina219.current_overflow():
-                self.ina219.configure(
-                    voltage_range=self.voltage_range, 
-                    gain=self.gain, 
-                    bus_adc=self.bus_adc, 
-                    shunt_adc=self.shunt_adc)                
-            else:
                 self._shuntVoltagemV = self.ina219.shunt_voltage()
                 self._voltageV = float(self.ina219.voltage())
                 self._currentmA = float(self.ina219.current())
