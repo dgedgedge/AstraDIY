@@ -1,11 +1,9 @@
 #!/bin/env python3
 import sys
-import os
-import signal
 import math
 from PyQt5.QtCore import QTimer
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QPushButton, QVBoxLayout, QGridLayout
-from PyQt5.QtWidgets import QHBoxLayout, QLineEdit, QLabel, QFrame, QComboBox
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QGridLayout
+from PyQt5.QtWidgets import  QLabel, QFrame
 from PyQt5.QtCore import Qt
 from AstraIna import AstraIna
 from AstraCommonHmi import dataMenu
@@ -90,18 +88,16 @@ class ina219Frame(QFrame):
         intPeriodm %= 60
 
         self.textVoltageV.setText(f"{self.ina219.voltageV():+.1f}")
-        self.textCurrentA.setText(f"{self.ina219.currentA():+.1f}")
-        self.textPowerW.setText(f"{self.ina219.powerW():+.1f}")
-        self.textEnergieWH.setText(formatEnergie(self.ina219.energiemWS()/3600/1000))
+        self.textCurrentA.setText(f"{self.ina219.currentA():+.3f}")
+        self.textPowerW.setText(f"{self.ina219.powerW():+.3f}")
+        self.textEnergieWH.setText(formatEnergie(self.ina219.energieWS()/3600))
         self.intPeriod.setText(f"{intPeriodh:2d}:{intPeriodm:2d}:{intPeriods:2d}")
 
-    def getTotalEnergieWh(self):
-        return self.ina219.getTotalEnergiemWS()/3600/1000
 
 class MainInaWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-
+        self.tensionRefV=12
         # Layout de type grille
         self.main_layout = QGridLayout()
         self.main_layout.setSpacing(0)
@@ -111,7 +107,7 @@ class MainInaWindow(QWidget):
         self.TotalEnergieWh.setReadOnly(True)
         self.TotalEnergieWh.setStyleSheet("border: 1px solid black;") 
 
-        self.TotalEnergieAh:dataMenu = dataMenu(" Total Ah sous 12V = ", "Ah ", parent=self)
+        self.TotalEnergieAh:dataMenu = dataMenu(f" Total Ah sous {self.tensionRefV}V = ", "Ah ", parent=self)
         self.TotalEnergieAh.setReadOnly(True)
         self.TotalEnergieAh.setStyleSheet("border: 1px solid black;") 
 
@@ -144,7 +140,7 @@ class MainInaWindow(QWidget):
  
     def  update_text_fields(self):
         self.TotalEnergieWh.setText(formatEnergie(self.widgets[1].getTotalEnergieWh()))
-        self.TotalEnergieAh.setText(formatEnergie(self.widgets[1].getTotalEnergieWh()/12))
+        self.TotalEnergieAh.setText(formatEnergie(self.widgets[1].getTotalEnergieWh()/self.tensionRefV))
   
         for widget in self.widgets:
             widget.update_text_fields() 

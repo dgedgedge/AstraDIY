@@ -264,10 +264,16 @@ class AstraIna:
     
     def energiemWS(self)->float:
         """ 
-        Return Cumulated Energie cosumption in VAs Ws Joules
+        Return Cumulated Energie cosumption in mVAs mWs mJoules
         """
         return self._energiemWS
     
+    def energieWS(self)->float:
+        """ 
+        Return Cumulated Energie cosumption in VAs Ws Joules
+        """
+        return (self._energiemWS / 1000.0)
+        
     def intPeriodS(self)->float:
         return self._intPeriodS
     
