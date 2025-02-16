@@ -269,16 +269,17 @@ if __name__ == "__main__":
             listIna.append(AstraIna(name=name))
         while True:
             time.sleep(1)
-            print("Energie=",listIna[0].get_totalEnergie()/3600," mAh")
+            ina219:AstraIna=listIna[0]
+            print("Energie=",ina219.getTotalEnergiemWS()/3600," mAh")
             print("===============================================================")
             for ina219 in listIna:
-                name=ina219.get_name()
-                shunt_voltage = ina219.shunt_voltage()
-                bus_voltage = ina219.voltage()
-                current = ina219.current()
-                power = ina219.power()
-                energie = ina219.energie() / 60 / 60
-                intPeriod=ina219.intPeriod()
+                name=ina219.getName()
+                shunt_voltage = ina219.shuntVoltageV()
+                bus_voltage = ina219.voltageV()
+                current = ina219.currentA()
+                power = ina219.powermW()
+                energie = ina219.energiemWS() / 60 / 60
+                intPeriod=ina219.intPeriodS()
 
                 print(f"{name}: Shunt {shunt_voltage:+.3f}V, Bus {bus_voltage:+.3f}V Current: {current:+.3f}A, Power: {power:.3f}mW Energie: {energie:.3f}mWh  intPeriod: {intPeriod:.3f}s")
     else:
