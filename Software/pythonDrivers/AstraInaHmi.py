@@ -46,9 +46,9 @@ class ina219Frame(QFrame):
         self.textCurrentA.setReadOnly(True)
 
         # PowerQT
-        self.textPowerW:dataMenu = dataMenu("Power", "W", parent=self)
-        self.textPowerW.setFixedWidth(80,70,50)
-        self.textPowerW.setReadOnly(True)
+        self.textPowermW:dataMenu = dataMenu("Power", "mW", parent=self)
+        self.textPowermW.setFixedWidth(80,70,50)
+        self.textPowermW.setReadOnly(True)
 
         # EnergieQT
         self.textEnergieWH:dataMenu = dataMenu("Energie", "Wh", parent=self)
@@ -63,7 +63,7 @@ class ina219Frame(QFrame):
         self.styleElement:str = "background: transparent; background-color: transparent; border: none; color: black;"
         self.textVoltageV.setStyleSheet(self.styleElement)
         self.textCurrentA.setStyleSheet(self.styleElement)
-        self.textPowerW.setStyleSheet(self.styleElement)
+        self.textPowermW.setStyleSheet(self.styleElement)
         self.textEnergieWH.setStyleSheet(self.styleElement)
         self.intPeriod.setStyleSheet(self.styleElement)
 
@@ -73,7 +73,7 @@ class ina219Frame(QFrame):
         layout.addWidget(label)
         layout.addWidget(self.textVoltageV)
         layout.addWidget(self.textCurrentA)
-        layout.addWidget(self.textPowerW)
+        layout.addWidget(self.textPowermW)
         layout.addWidget(self.textEnergieWH)
         layout.addWidget(self.intPeriod)
         layout.setSpacing(0)
@@ -91,7 +91,7 @@ class ina219Frame(QFrame):
 
         self.textVoltageV.setText(f"{self.ina219.voltageV():+.1f}")
         self.textCurrentA.setText(f"{self.ina219.currentA():+.1f}")
-        self.textPowerW.setText(formatEnergie(self.ina219.powermW()/1000))
+        self.textPowermW.setText(f"{self.ina219.powermW():+.1f}"))
         self.textEnergieWH.setText(formatEnergie(self.ina219.energiemWS()/3600/1000))
         self.intPeriod.setText(f"{intPeriodh:2d}:{intPeriodm:2d}:{intPeriods:2d}")
 
