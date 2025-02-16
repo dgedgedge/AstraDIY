@@ -91,7 +91,7 @@ class ina219Frame(QFrame):
 
         self.textVoltageV.setText(f"{self.ina219.voltageV():+.1f}")
         self.textCurrentA.setText(f"{self.ina219.currentA():+.1f}")
-        self.textPowermW.setText(f"{self.ina219.powermW():+.1f}"))
+        self.textPowermW.setText(f"{self.ina219.powermW():+.1f}")
         self.textEnergieWH.setText(formatEnergie(self.ina219.energiemWS()/3600/1000))
         self.intPeriod.setText(f"{intPeriodh:2d}:{intPeriodm:2d}:{intPeriods:2d}")
 
