@@ -94,6 +94,9 @@ class ina219Frame(QFrame):
         self.intPeriod.setText(f"{intPeriodh:2d}:{intPeriodm:2d}:{intPeriods:2d}")
 
 
+    def getTotalEnergieWh(self):
+        return self.ina219.getTotalEnergiemWS()/3600.0/1000.0
+
 class MainInaWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
