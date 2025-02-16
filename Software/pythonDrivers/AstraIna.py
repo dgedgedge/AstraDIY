@@ -32,16 +32,19 @@ class AstraInaFetcher(threading.Thread):
     def run(self):
         while self.running:
             ina:AstraIna=None
-            listIna:list=None
-            time.sleep(0.1)
+            time.sleep(0.4)
             with self.listInalock:
-                listIna=self.listIna
-            totalEnergiemWS:float=0.0
-            for ina in listIna:
-                ina.update()
-                totalEnergiemWS+=ina.energiemWS()
-                #print(ina["address"]," voltage", ina["voltage"])
-            self.totalEnergiemWS=totalEnergiemWS
+                totalEnergiemWS:float=0.0
+                for ina in self.listIna:
+                    ina.sendConfiguration()
+                
+                time.sleep(0.1)
+
+                for ina in self.listIna:
+                    ina.getDataFromIna()
+                    totalEnergiemWS+=ina.energiemWS()
+                    #print(ina["address"]," voltage", ina["voltage"])
+                self.totalEnergiemWS=totalEnergiemWS
 
     def stop(self):
         self.running=False
@@ -118,8 +121,10 @@ class AstraIna:
         self.shunt_adc=-1
                  
         # Last collection
-        self.lasttimeS:float=0.0
-        self.firsttime:float=0.0
+        self.firstPing=True
+        self.pingOk=True
+        self._lasttimeS:float=0.0
+        self._firsttime:float=0.0
         self._intPeriodS:float=0.0
 
         self._voltageV:float=0.0
@@ -152,40 +157,51 @@ class AstraIna:
             else:
                 raise Exception("Unkown AstraIna")
 
-    def update(self):
+    def sendConfiguration(self):
+        """
+        As the INA may loose it's configuration, it is necessary to:
+        1- Check if the ina is present.
+        2- Send the configuration if it is present.
+        Collect of the data shall be done through getDataFromIna 
+        The method is not threadsafe and shall be called by a uniq thread.
+        """
+        pingOk=False
+        self.configurationSend=False
+        if self.ina219.ping():
+            pingOk=True
+            if self.firstPing:
+                self.firstPing=False
+                self._lasttimeS = time.perf_counter()
+                self.firstttime= time.perf_counter()
+        if pingOk:
+            self.ina219.configure(
+                voltage_range=self.voltage_range, 
+                gain=self.gain, 
+                bus_adc=self.bus_adc, 
+                shunt_adc=self.shunt_adc)
+            self.configurationSend = True            
+        
+    def getDataFromIna(self):
         """
         Do the INA iteraction.
-        Configure the INA if configration was set and INA responds.
+        The user shall have called sendConfiguration each time before calling this method.
         Collects measures of the INA for publication.
-        The method is not threadsafe and shall be caulled by a uniq thread.
+        The method is not threadsafe and shall be called by a uniq thread.
+        It is considered that the last measure OK is cummulated in the energy.
         """
         if self.configurationSend:
             curtimeS=time.perf_counter()
-            deltatimeS=curtimeS-self.lasttimeS
-            self.ina219.configure(
-                voltage_range=self.voltage_range, 
-                gain=self.gain, 
-                bus_adc=self.bus_adc, 
-                shunt_adc=self.shunt_adc)
-            time.sleep(0.2)              
-            if self.ina219.current_overflow():
-                self._shuntVoltagemV = self.ina219.shunt_voltage()
-                self._voltageV = float(self.ina219.voltage())
-                self._currentmA = float(self.ina219.current())
-                self._powermW = float(self.ina219.power())
+            deltatimeS=curtimeS-self._lasttimeS
+            if self.ina219.is_conversion_ready():
+                if not self.ina219.current_overflow():
+                    self._shuntVoltagemV = self.ina219.shunt_voltage()
+                    self._voltageV = float(self.ina219.voltage())
+                    self._currentmA = float(self.ina219.current())
+                    self._powermW = float(self.ina219.power())
             energiemWS=self._powermW * deltatimeS
             self._energiemWS += energiemWS
-            self.lasttimeS=curtimeS
+            self._lasttimeS=curtimeS
             self._intPeriodS=curtimeS-self.firstttime
-        elif self.ina219.ping() and self.configured:
-            self.lasttimeS = time.perf_counter()
-            self.firstttime= time.perf_counter()
-            self.ina219.configure(
-                voltage_range=self.voltage_range, 
-                gain=self.gain, 
-                bus_adc=self.bus_adc, 
-                shunt_adc=self.shunt_adc)
-            self.configurationSend = True
     
     def configure(self, voltage_range=INA219.RANGE_16V, gain=INA219.GAIN_AUTO, bus_adc=INA219.ADC_12BIT, shunt_adc=INA219.ADC_12BIT):
         if self.configured:
