@@ -203,7 +203,7 @@ class AstraIna:
         """
         Return the last seen bus voltage in volts.
         """
-        return self.voltageV
+        return self._voltageV
 
     def shuntVoltagemV(self)->float:
         """
@@ -221,13 +221,13 @@ class AstraIna:
         """
         Return the bus current in milliamps.
         """
-        return self.currentmA
+        return self._currentmA
 
     def currentA(self)->float:
         """
         Return the bus current in Amps.
         """
-        return (self.currentmA/1000.0)
+        return (self._currentmA/1000.0)
     
     def powermW(self)->float:
         """
