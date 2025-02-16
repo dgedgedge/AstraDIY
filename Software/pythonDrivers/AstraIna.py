@@ -188,7 +188,7 @@ class AstraIna:
             self.voltage_range=voltage_range
             self.gain=gain
             self.bus_adc=bus_adc
-            self.hunt_adc=shunt_adc
+            self.shunt_adc=shunt_adc
             self.AstraInaFetcher.setIna(self)
             self.configured=True
 
