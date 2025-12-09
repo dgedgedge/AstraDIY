@@ -2,7 +2,7 @@
 Those scripts where developped with stellarmate 1.8.
 
 # Overall:
-To install all please run "sudo install.sh"
+To install all please run "sudo ./install.sh"
 
 But you may install the parts as specified below :
 
