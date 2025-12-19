@@ -11,6 +11,8 @@
 #include <ctime>
 #include <array>
 #include <memory>
+#include <sstream>
+#include <vector>
 
 // Singleton instance
 static std::unique_ptr<AstrAlimSystem> systemInstance(new AstrAlimSystem());
@@ -43,6 +45,14 @@ bool AstrAlimSystem::initProperties()
     SysInfoTP[5].fill("LOCAL_IP", "Local IP", nullptr);
     SysInfoTP.fill(getDeviceName(), "SYSTEM_INFO", "System Info", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
     
+    // Disk Space (root + USB drives)
+    DiskSpaceTP[0].fill("ROOT_DISK", "Disque système", nullptr);
+    DiskSpaceTP[1].fill("USB1", "USB 1", nullptr);
+    DiskSpaceTP[2].fill("USB2", "USB 2", nullptr);
+    DiskSpaceTP[3].fill("USB3", "USB 3", nullptr);
+    DiskSpaceTP[4].fill("USB4", "USB 4", nullptr);
+    DiskSpaceTP.fill(getDeviceName(), "DISK_SPACE", "Espace disque", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+    
     // System Control
     SysControlSP[CTRL_REBOOT].fill("REBOOT", "Reboot", ISS_OFF);
     SysControlSP[CTRL_SHUTDOWN].fill("SHUTDOWN", "Shutdown", ISS_OFF);
@@ -67,12 +77,14 @@ bool AstrAlimSystem::updateProperties()
     {
         defineProperty(SysTimeTP);
         defineProperty(SysInfoTP);
+        defineProperty(DiskSpaceTP);
         defineProperty(SysControlSP);
     }
     else
     {
         deleteProperty(SysTimeTP);
         deleteProperty(SysInfoTP);
+        deleteProperty(DiskSpaceTP);
         deleteProperty(SysControlSP);
         deleteProperty(SysConfirmSP);
     }
@@ -84,6 +96,7 @@ bool AstrAlimSystem::Connect()
 {
     // Get initial system info
     updateSystemInfo();
+    updateDiskSpace();
     
     // Start timer
     SetTimer(POLL_INTERVAL_MS);
@@ -110,6 +123,7 @@ void AstrAlimSystem::TimerHit()
     if (++pollCounter >= INFO_UPDATE_CYCLES)
     {
         updateSystemInfo();
+        updateDiskSpace();
         pollCounter = 0;
     }
     
@@ -176,6 +190,140 @@ void AstrAlimSystem::updateSystemInfo()
     
     SysInfoTP.setState(IPS_OK);
     SysInfoTP.apply();
+}
+
+void AstrAlimSystem::updateDiskSpace()
+{
+    DiskSpaceTP.setState(IPS_BUSY);
+    DiskSpaceTP.apply();
+    
+    // Reset all disk space fields
+    for (int i = 0; i < 5; i++)
+    {
+        DiskSpaceTP[i].setText("");
+    }
+    
+    // Get root filesystem info
+    std::string rootCmd = "df -h / 2>/dev/null | tail -1 | awk '{print $1\"|\"$2\"|\"$3\"|\"$4\"|\"$5\"|\"$6}'";
+    std::string rootLine = execCommand(rootCmd.c_str());
+    if (!rootLine.empty() && rootLine.back() == '\n') rootLine.pop_back();
+    
+    bool rootFound = false;
+    int usbIndex = 1; // Start at USB1 (index 1, index 0 is root)
+    
+    // Parse root filesystem
+    if (!rootLine.empty())
+    {
+        std::istringstream rootStream(rootLine);
+        std::string token;
+        std::vector<std::string> tokens;
+        
+        while (std::getline(rootStream, token, '|'))
+        {
+            tokens.push_back(token);
+        }
+        
+        if (tokens.size() >= 6)
+        {
+            std::string device = tokens[0];
+            std::string size = tokens[1];
+            std::string used = tokens[2];
+            std::string avail = tokens[3];
+            std::string percent = tokens[4];
+            std::string mountPoint = tokens[5];
+            
+            if (mountPoint == "/")
+            {
+                std::string formatted = formatDiskSpace(device, mountPoint, size, used, avail, percent);
+                DiskSpaceTP[0].setText(formatted.c_str());
+                rootFound = true;
+            }
+        }
+    }
+    
+    // Get USB drives (mounted in /media/ or /mnt/)
+    std::string usbCmd = "df -h 2>/dev/null | grep -E '^/dev/' | grep -E '/media/|/mnt/' | grep -v '/dev/loop' | awk '{print $1\"|\"$2\"|\"$3\"|\"$4\"|\"$5\"|\"$6}'";
+    std::string usbOutput = execCommand(usbCmd.c_str());
+    
+    if (!usbOutput.empty())
+    {
+        std::istringstream usbStream(usbOutput);
+        std::string line;
+        
+        while (std::getline(usbStream, line) && usbIndex < 5)
+        {
+            if (line.empty()) continue;
+            if (line.back() == '\n') line.pop_back();
+            
+            std::istringstream lineStream(line);
+            std::string token;
+            std::vector<std::string> tokens;
+            
+            while (std::getline(lineStream, token, '|'))
+            {
+                tokens.push_back(token);
+            }
+            
+            if (tokens.size() >= 6)
+            {
+                std::string device = tokens[0];
+                std::string size = tokens[1];
+                std::string used = tokens[2];
+                std::string avail = tokens[3];
+                std::string percent = tokens[4];
+                std::string mountPoint = tokens[5];
+                
+                // Extract USB label from mount point (e.g., /media/user/USBKEY -> USBKEY)
+                std::string usbLabel = mountPoint;
+                size_t lastSlash = usbLabel.find_last_of('/');
+                if (lastSlash != std::string::npos && lastSlash < usbLabel.length() - 1)
+                {
+                    usbLabel = usbLabel.substr(lastSlash + 1);
+                }
+                else
+                {
+                    usbLabel = mountPoint; // Fallback to full path if no slash found
+                }
+                
+                std::string formatted = formatDiskSpace(device, usbLabel, size, used, avail, percent);
+                DiskSpaceTP[usbIndex].setText(formatted.c_str());
+                usbIndex++;
+            }
+        }
+    }
+    
+    // Set empty USB slots to "Non monté"
+    for (int i = usbIndex; i < 5; i++)
+    {
+        if (DiskSpaceTP[i].getText() == nullptr || strlen(DiskSpaceTP[i].getText()) == 0)
+        {
+            DiskSpaceTP[i].setText("Non monté");
+        }
+    }
+    
+    DiskSpaceTP.setState(IPS_OK);
+    DiskSpaceTP.apply();
+}
+
+std::string AstrAlimSystem::formatDiskSpace(const std::string& device, const std::string& mountPoint, 
+                                             const std::string& size, const std::string& used, 
+                                             const std::string& avail, const std::string& percent)
+{
+    // Format: "Disque: 15.2G / 32G (47% utilisé) - /dev/sda1"
+    // Or for USB: "USBKEY: 2.1G / 8.0G (26% utilisé) - /dev/sdb1"
+    
+    std::string label = (mountPoint == "/") ? "Disque" : mountPoint;
+    std::string percentClean = percent;
+    if (!percentClean.empty() && percentClean.back() == '%')
+    {
+        percentClean.pop_back();
+    }
+    
+    char formatted[128];
+    snprintf(formatted, sizeof(formatted), "%s: %s libres / %s total (%s%% utilisé) - %s", 
+             label.c_str(), avail.c_str(), size.c_str(), percentClean.c_str(), device.c_str());
+    
+    return std::string(formatted);
 }
 
 std::string AstrAlimSystem::execCommand(const char* cmd)

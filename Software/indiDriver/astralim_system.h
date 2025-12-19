@@ -8,6 +8,7 @@
 #define ASTRALIM_SYSTEM_H
 
 #include <defaultdevice.h>
+#include <string>
 
 class AstrAlimSystem : public INDI::DefaultDevice
 {
@@ -30,13 +31,20 @@ protected:
 private:
     void updateSystemInfo();
     void updateTime();
+    void updateDiskSpace();
     std::string execCommand(const char* cmd);
+    std::string formatDiskSpace(const std::string& device, const std::string& mountPoint, 
+                                 const std::string& size, const std::string& used, const std::string& avail, 
+                                 const std::string& percent);
 
     // Properties - System Time
     INDI::PropertyText SysTimeTP {2};
     
     // Properties - System Info
     INDI::PropertyText SysInfoTP {6};
+    
+    // Properties - Disk Space (root + up to 4 USB drives)
+    INDI::PropertyText DiskSpaceTP {5};
     
     // Properties - System Control
     INDI::PropertySwitch SysControlSP {2};
