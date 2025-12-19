@@ -208,7 +208,6 @@ void AstrAlimSystem::updateDiskSpace()
     std::string rootLine = execCommand(rootCmd.c_str());
     if (!rootLine.empty() && rootLine.back() == '\n') rootLine.pop_back();
     
-    bool rootFound = false;
     int usbIndex = 1; // Start at USB1 (index 1, index 0 is root)
     
     // Parse root filesystem
@@ -236,7 +235,6 @@ void AstrAlimSystem::updateDiskSpace()
             {
                 std::string formatted = formatDiskSpace(device, mountPoint, size, used, avail, percent);
                 DiskSpaceTP[0].setText(formatted.c_str());
-                rootFound = true;
             }
         }
     }
@@ -311,6 +309,8 @@ std::string AstrAlimSystem::formatDiskSpace(const std::string& device, const std
 {
     // Format: "Disque: 15.2G / 32G (47% utilisé) - /dev/sda1"
     // Or for USB: "USBKEY: 2.1G / 8.0G (26% utilisé) - /dev/sdb1"
+    
+    (void)used; // Parameter kept for future use but not currently needed in format
     
     std::string label = (mountPoint == "/") ? "Disque" : mountPoint;
     std::string percentClean = percent;
