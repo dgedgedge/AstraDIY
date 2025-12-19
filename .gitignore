@@ -69,9 +69,6 @@ instance/
 # Sphinx documentation
 docs/_build/
 
-# Documentation locale
-docs/
-
 # PyBuilder
 .pybuilder/
 target/
@@ -170,3 +167,6 @@ venv/
 # Scripts de développement
 scripts_dev/
 **/scripts_dev/
+
+# Documentation INDI Driver
+Software/indiDriver/docs/
