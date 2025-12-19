@@ -7,8 +7,15 @@ sudo ${FILESOURCE}/install_bootConfig.sh
 ${FILESOURCE}/install_autostart.sh
 
 # Déterminer le répertoire du bureau
-DESKTOP_DIR="${HOME}/Desktop"
-DESKTOP_DIR_ALT="${HOME}/Bureau"  # Pour les systèmes en français
+# Utiliser l'utilisateur réel (même si le script est lancé avec sudo)
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME=$(getent passwd "$REAL_USER" 2>/dev/null | cut -d: -f6)
+if [ -z "$REAL_HOME" ]; then
+    REAL_HOME="$HOME"
+fi
+
+DESKTOP_DIR="${REAL_HOME}/Desktop"
+DESKTOP_DIR_ALT="${REAL_HOME}/Bureau"  # Pour les systèmes en français
 TARGET_DESKTOP=""
 if [ -d "$DESKTOP_DIR" ]; then
     TARGET_DESKTOP="$DESKTOP_DIR"
