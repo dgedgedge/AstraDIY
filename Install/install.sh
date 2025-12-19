@@ -55,6 +55,32 @@ EOF
     gio set "$TARGET_DESKTOP/AstraGPS.desktop" metadata::trusted true 2>/dev/null || true
     echo "  ✓ AstraGPS.desktop installé"
     
+    # Fichier .desktop pour la mise à jour
+    UPDATE_SCRIPT="${FILESOURCE}/update_astralim.sh"
+    if [ -f "$UPDATE_SCRIPT" ]; then
+        # Convertir le chemin du script en chemin absolu
+        UPDATE_SCRIPT_ABS=$(cd "$(dirname "$UPDATE_SCRIPT")" && pwd)/$(basename "$UPDATE_SCRIPT")
+        
+        # Créer le fichier .desktop pour la mise à jour
+        cat > "$TARGET_DESKTOP/Mise à Jour Astralim.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=Mise à Jour Astralim
+Comment=Met à jour le dépôt Git et relance l'installation AstraDIY
+Exec=bash "${UPDATE_SCRIPT_ABS}"
+Icon=${LOGO_PATH}
+Terminal=true
+Categories=System;Settings;
+StartupNotify=true
+Path=
+EOF
+        chmod +x "$TARGET_DESKTOP/Mise à Jour Astralim.desktop"
+        gio set "$TARGET_DESKTOP/Mise à Jour Astralim.desktop" metadata::trusted true 2>/dev/null || true
+        echo "  ✓ Mise à Jour Astralim.desktop installé"
+    else
+        echo "  ⚠ Script de mise à jour non trouvé: $UPDATE_SCRIPT"
+    fi
+    
     # Fichier .desktop pour l'installation des drivers INDI
     INDI_DRIVER_DIR="${FILESOURCE}/../Software/indiDriver"
     # Convertir en chemin absolu
