@@ -20,6 +20,9 @@ fi
 if [ -n "$TARGET_DESKTOP" ]; then
     echo "Installation des raccourcis sur le bureau..."
     
+    # Chemin vers le logo (installé dans /opt/AstraDIY/logo/)
+    LOGO_PATH="/opt/AstraDIY/logo/logo-astralim.jpg"
+    
     # Fichier .desktop pour AstraDIY HMI
     cat > "$TARGET_DESKTOP/AstraDIY.desktop" << EOF
 [Desktop Entry]
@@ -27,7 +30,7 @@ Type=Application
 Name=AstraDIY
 Comment=Panneau de contrôle AstraDIY (Bandes chauffantes, Alimentations, GPS)
 Exec=/opt/AstraDIY/AstraDIYHmi.py
-Icon=application-x-executable
+Icon=${LOGO_PATH}
 Terminal=false
 Categories=System;Settings;
 StartupNotify=true
@@ -42,7 +45,7 @@ Type=Application
 Name=AstraGPS
 Comment=Interface GPS et Horloge AstraDIY
 Exec=/opt/AstraDIY/AstraGpsHmi.py
-Icon=application-x-executable
+Icon=${LOGO_PATH}
 Terminal=false
 Categories=System;Settings;
 StartupNotify=true
@@ -62,7 +65,7 @@ Type=Application
 Name=Installer Drivers INDI AstrAlim
 Comment=Compile et installe les drivers INDI pour AstrAlim
 Exec=bash -c "cd \"${INDI_DRIVER_DIR_ABS}\" && sudo ./install_indi_astralim.sh"
-Icon=application-x-executable
+Icon=${LOGO_PATH}
 Terminal=true
 Categories=System;Settings;
 StartupNotify=true
