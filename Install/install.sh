@@ -21,7 +21,7 @@ if [ -n "$TARGET_DESKTOP" ]; then
     echo "Installation des raccourcis sur le bureau..."
     
     # Chemin vers le logo (installé dans /opt/AstraDIY/logo/)
-    LOGO_PATH="/opt/AstraDIY/logo/logo-astralim.jpg"
+    LOGO_PATH="/opt/AstraDIY/logo/logo-astralim-black.jpg"
     
     # Fichier .desktop pour AstraDIY HMI
     cat > "$TARGET_DESKTOP/AstraDIY.desktop" << EOF
