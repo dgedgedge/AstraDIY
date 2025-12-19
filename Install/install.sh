@@ -52,14 +52,16 @@ EOF
     
     # Fichier .desktop pour l'installation des drivers INDI
     INDI_DRIVER_DIR="${FILESOURCE}/../Software/indiDriver"
-    INDI_INSTALL_SCRIPT="${INDI_DRIVER_DIR}/install_indi_astralim.sh"
+    # Convertir en chemin absolu
+    INDI_DRIVER_DIR_ABS=$(cd "$INDI_DRIVER_DIR" && pwd)
+    INDI_INSTALL_SCRIPT="${INDI_DRIVER_DIR_ABS}/install_indi_astralim.sh"
     if [ -f "$INDI_INSTALL_SCRIPT" ]; then
         cat > "$TARGET_DESKTOP/Install_INDIAstrAlim.desktop" << EOF
 [Desktop Entry]
 Type=Application
 Name=Installer Drivers INDI AstrAlim
 Comment=Compile et installe les drivers INDI pour AstrAlim
-Exec=bash -c "cd \"${INDI_DRIVER_DIR}\" && sudo ./install_indi_astralim.sh"
+Exec=bash -c "cd \"${INDI_DRIVER_DIR_ABS}\" && sudo ./install_indi_astralim.sh"
 Icon=application-x-executable
 Terminal=true
 Categories=System;Settings;
@@ -69,7 +71,7 @@ EOF
         chmod +x "$TARGET_DESKTOP/Install_INDIAstrAlim.desktop"
         echo "  ✓ Install_INDIAstrAlim.desktop installé"
     else
-        echo "  ⚠ Script d'installation INDI non trouvé dans: $INDI_DRIVER_DIR"
+        echo "  ⚠ Script d'installation INDI non trouvé dans: $INDI_DRIVER_DIR_ABS"
     fi
 else
     echo "Attention: Répertoire Bureau non trouvé. Les fichiers .desktop n'ont pas été installés."
