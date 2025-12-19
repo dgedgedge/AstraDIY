@@ -5,6 +5,8 @@ from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea
 from AstraGps import AstraGps
 
+QApplication.setApplicationName("AstraGPS")
+
 class MainGpsWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)

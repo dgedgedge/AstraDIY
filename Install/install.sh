@@ -35,6 +35,14 @@ if [ -f "$LOGO_SOURCE" ]; then
     if command -v gtk-update-icon-cache >/dev/null 2>&1; then
         gtk-update-icon-cache -f -t "${REAL_HOME}/.local/share/icons/hicolor" 2>/dev/null || true
     fi
+    # Mettre à jour le cache LXDE si disponible
+    if [ -d "${REAL_HOME}/.cache/lxpanel" ]; then
+        touch "${REAL_HOME}/.cache/lxpanel" 2>/dev/null || true
+    fi
+    # Forcer la mise à jour du cache pour l'utilisateur réel
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        sudo -u "$REAL_USER" gtk-update-icon-cache -f -t "${REAL_HOME}/.local/share/icons/hicolor" 2>/dev/null || true
+    fi
 else
     echo "  ⚠ Logo source non trouvé: $LOGO_SOURCE"
 fi
@@ -57,6 +65,7 @@ Icon=${ICON_NAME}
 Terminal=false
 Categories=System;Settings;
 StartupNotify=true
+StartupWMClass=AstraDIY
 EOF
     chmod +x "$TARGET_DESKTOP/AstraDIY.desktop"
     gio set "$TARGET_DESKTOP/AstraDIY.desktop" metadata::trusted true 2>/dev/null || true
@@ -73,6 +82,7 @@ Icon=${ICON_NAME}
 Terminal=false
 Categories=System;Settings;
 StartupNotify=true
+StartupWMClass=AstraGPS
 EOF
     chmod +x "$TARGET_DESKTOP/AstraGPS.desktop"
     gio set "$TARGET_DESKTOP/AstraGPS.desktop" metadata::trusted true 2>/dev/null || true
