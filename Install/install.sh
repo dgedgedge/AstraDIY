@@ -36,6 +36,7 @@ Categories=System;Settings;
 StartupNotify=true
 EOF
     chmod +x "$TARGET_DESKTOP/AstraDIY.desktop"
+    gio set "$TARGET_DESKTOP/AstraDIY.desktop" metadata::trusted true 2>/dev/null || true
     echo "  ✓ AstraDIY.desktop installé"
     
     # Fichier .desktop pour AstraGPS HMI
@@ -51,6 +52,7 @@ Categories=System;Settings;
 StartupNotify=true
 EOF
     chmod +x "$TARGET_DESKTOP/AstraGPS.desktop"
+    gio set "$TARGET_DESKTOP/AstraGPS.desktop" metadata::trusted true 2>/dev/null || true
     echo "  ✓ AstraGPS.desktop installé"
     
     # Fichier .desktop pour l'installation des drivers INDI
@@ -72,6 +74,7 @@ StartupNotify=true
 Path=
 EOF
         chmod +x "$TARGET_DESKTOP/Install_INDIAstrAlim.desktop"
+        gio set "$TARGET_DESKTOP/Install_INDIAstrAlim.desktop" metadata::trusted true 2>/dev/null || true
         echo "  ✓ Install_INDIAstrAlim.desktop installé"
     else
         echo "  ⚠ Script d'installation INDI non trouvé dans: $INDI_DRIVER_DIR_ABS"
