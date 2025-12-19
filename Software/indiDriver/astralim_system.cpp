@@ -307,23 +307,91 @@ std::string AstrAlimSystem::formatDiskSpace(const std::string& device, const std
                                              const std::string& size, const std::string& used, 
                                              const std::string& avail, const std::string& percent)
 {
-    // Format: "Disque: 15.2G / 32G (47% utilisé) - /dev/sda1"
-    // Or for USB: "USBKEY: 2.1G / 8.0G (26% utilisé) - /dev/sdb1"
+    // For root filesystem: "250GO / 500GO - 50% libre"
+    // For USB: "USBKEY: 2.1G libres / 8.0G total (26% utilisé) - /dev/sdb1"
     
-    (void)used; // Parameter kept for future use but not currently needed in format
-    
-    std::string label = (mountPoint == "/") ? "Disque" : mountPoint;
-    std::string percentClean = percent;
-    if (!percentClean.empty() && percentClean.back() == '%')
+    if (mountPoint == "/")
     {
-        percentClean.pop_back();
+        // Format simplifié pour le disque système
+        std::string sizeGO = size;
+        std::string usedGO = used;
+        
+        // Convertir les unités en "GO" si nécessaire (G -> GO, M -> MO, etc.)
+        if (sizeGO.back() == 'G')
+        {
+            sizeGO += "O";
+        }
+        else if (sizeGO.back() == 'M')
+        {
+            sizeGO += "O";
+        }
+        else if (sizeGO.back() == 'K')
+        {
+            sizeGO += "O";
+        }
+        else if (sizeGO.back() == 'T')
+        {
+            sizeGO += "O";
+        }
+        
+        if (usedGO.back() == 'G')
+        {
+            usedGO += "O";
+        }
+        else if (usedGO.back() == 'M')
+        {
+            usedGO += "O";
+        }
+        else if (usedGO.back() == 'K')
+        {
+            usedGO += "O";
+        }
+        else if (usedGO.back() == 'T')
+        {
+            usedGO += "O";
+        }
+        
+        // Calculer le pourcentage libre
+        std::string percentClean = percent;
+        if (!percentClean.empty() && percentClean.back() == '%')
+        {
+            percentClean.pop_back();
+        }
+        
+        int percentUsed = 0;
+        try
+        {
+            percentUsed = std::stoi(percentClean);
+        }
+        catch (...)
+        {
+            percentUsed = 0;
+        }
+        
+        int percentFree = 100 - percentUsed;
+        
+        char formatted[128];
+        snprintf(formatted, sizeof(formatted), "%s / %s - %d%% libre", 
+                 usedGO.c_str(), sizeGO.c_str(), percentFree);
+        
+        return std::string(formatted);
     }
-    
-    char formatted[128];
-    snprintf(formatted, sizeof(formatted), "%s: %s libres / %s total (%s%% utilisé) - %s", 
-             label.c_str(), avail.c_str(), size.c_str(), percentClean.c_str(), device.c_str());
-    
-    return std::string(formatted);
+    else
+    {
+        // Format détaillé pour les USB
+        std::string label = mountPoint;
+        std::string percentClean = percent;
+        if (!percentClean.empty() && percentClean.back() == '%')
+        {
+            percentClean.pop_back();
+        }
+        
+        char formatted[128];
+        snprintf(formatted, sizeof(formatted), "%s: %s libres / %s total (%s%% utilisé) - %s", 
+                 label.c_str(), avail.c_str(), size.c_str(), percentClean.c_str(), device.c_str());
+        
+        return std::string(formatted);
+    }
 }
 
 std::string AstrAlimSystem::execCommand(const char* cmd)
