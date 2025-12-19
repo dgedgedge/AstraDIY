@@ -6,24 +6,54 @@ sudo ${FILESOURCE}/install_scripts.sh
 sudo ${FILESOURCE}/install_bootConfig.sh
 ${FILESOURCE}/install_autostart.sh
 
-# Installation du fichier .desktop pour les drivers INDI sur le bureau
-echo "Installation du raccourci d'installation des drivers INDI sur le bureau..."
-INDI_DRIVER_DIR="${FILESOURCE}/../Software/indiDriver"
-INDI_INSTALL_SCRIPT="${INDI_DRIVER_DIR}/install_indi_astralim.sh"
+# Déterminer le répertoire du bureau
 DESKTOP_DIR="${HOME}/Desktop"
 DESKTOP_DIR_ALT="${HOME}/Bureau"  # Pour les systèmes en français
+TARGET_DESKTOP=""
+if [ -d "$DESKTOP_DIR" ]; then
+    TARGET_DESKTOP="$DESKTOP_DIR"
+elif [ -d "$DESKTOP_DIR_ALT" ]; then
+    TARGET_DESKTOP="$DESKTOP_DIR_ALT"
+fi
 
-if [ -f "$INDI_INSTALL_SCRIPT" ]; then
-    # Déterminer le répertoire du bureau
-    TARGET_DESKTOP=""
-    if [ -d "$DESKTOP_DIR" ]; then
-        TARGET_DESKTOP="$DESKTOP_DIR"
-    elif [ -d "$DESKTOP_DIR_ALT" ]; then
-        TARGET_DESKTOP="$DESKTOP_DIR_ALT"
-    fi
+# Installation des fichiers .desktop pour les HMI et les drivers INDI
+if [ -n "$TARGET_DESKTOP" ]; then
+    echo "Installation des raccourcis sur le bureau..."
     
-    if [ -n "$TARGET_DESKTOP" ]; then
-        # Créer un fichier .desktop qui appelle directement le script à son emplacement d'origine
+    # Fichier .desktop pour AstraDIY HMI
+    cat > "$TARGET_DESKTOP/AstraDIY.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=AstraDIY
+Comment=Panneau de contrôle AstraDIY (Bandes chauffantes, Alimentations, GPS)
+Exec=/opt/AstraDIY/AstraDIYHmi.py
+Icon=application-x-executable
+Terminal=false
+Categories=System;Settings;
+StartupNotify=true
+EOF
+    chmod +x "$TARGET_DESKTOP/AstraDIY.desktop"
+    echo "  ✓ AstraDIY.desktop installé"
+    
+    # Fichier .desktop pour AstraGPS HMI
+    cat > "$TARGET_DESKTOP/AstraGPS.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=AstraGPS
+Comment=Interface GPS et Horloge AstraDIY
+Exec=/opt/AstraDIY/AstraGpsHmi.py
+Icon=application-x-executable
+Terminal=false
+Categories=System;Settings;
+StartupNotify=true
+EOF
+    chmod +x "$TARGET_DESKTOP/AstraGPS.desktop"
+    echo "  ✓ AstraGPS.desktop installé"
+    
+    # Fichier .desktop pour l'installation des drivers INDI
+    INDI_DRIVER_DIR="${FILESOURCE}/../Software/indiDriver"
+    INDI_INSTALL_SCRIPT="${INDI_DRIVER_DIR}/install_indi_astralim.sh"
+    if [ -f "$INDI_INSTALL_SCRIPT" ]; then
         cat > "$TARGET_DESKTOP/Install_INDIAstrAlim.desktop" << EOF
 [Desktop Entry]
 Type=Application
@@ -37,13 +67,15 @@ StartupNotify=true
 Path=
 EOF
         chmod +x "$TARGET_DESKTOP/Install_INDIAstrAlim.desktop"
-        echo "Raccourci installé sur: $TARGET_DESKTOP/Install_INDIAstrAlim.desktop"
+        echo "  ✓ Install_INDIAstrAlim.desktop installé"
     else
-        echo "Attention: Répertoire Bureau non trouvé. Le fichier .desktop n'a pas été copié."
-        echo "Vous pouvez lancer manuellement: cd ${INDI_DRIVER_DIR} && sudo ./install_indi_astralim.sh"
+        echo "  ⚠ Script d'installation INDI non trouvé dans: $INDI_DRIVER_DIR"
     fi
 else
-    echo "Attention: Script d'installation INDI non trouvé dans: $INDI_DRIVER_DIR"
+    echo "Attention: Répertoire Bureau non trouvé. Les fichiers .desktop n'ont pas été installés."
+    echo "Vous pouvez les créer manuellement ou lancer directement:"
+    echo "  - /opt/AstraDIY/AstraDIYHmi.py"
+    echo "  - /opt/AstraDIY/AstraGpsHmi.py"
 fi
 
 # i2c 
