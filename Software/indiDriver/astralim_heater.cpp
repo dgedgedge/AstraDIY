@@ -205,13 +205,36 @@ bool AstrAlimHeater::Connect()
         ds18b20Path[1] = "/sys/bus/w1/devices/" + availableDS18B20[1] + "/w1_slave";
     }
     
+    // Security: Force OFF mode on startup (even if saved config has different mode)
+    Heater1ModeSP[MODE_OFF].setState(ISS_ON);
+    Heater1ModeSP[MODE_MANUAL].setState(ISS_OFF);
+    Heater1ModeSP[MODE_AUTO].setState(ISS_OFF);
+    Heater1ModeSP.setState(IPS_IDLE);
+    Heater1ModeSP.apply();
+    
+    Heater2ModeSP[MODE_OFF].setState(ISS_ON);
+    Heater2ModeSP[MODE_MANUAL].setState(ISS_OFF);
+    Heater2ModeSP[MODE_AUTO].setState(ISS_OFF);
+    Heater2ModeSP.setState(IPS_IDLE);
+    Heater2ModeSP.apply();
+    
+    // Ensure heaters are off
+    setPWMDuty(0, 0);
+    setPWMDuty(1, 0);
+    Heater1PowerNP[0].setValue(0);
+    Heater2PowerNP[0].setValue(0);
+    Heater1PowerNP.setState(IPS_IDLE);
+    Heater2PowerNP.setState(IPS_IDLE);
+    Heater1PowerNP.apply();
+    Heater2PowerNP.apply();
+    
     // Initial readings
     readBME280();
     readDS18B20Sensors();
     
     SetTimer(POLL_INTERVAL_MS);
     
-    LOG_INFO("AstrAlim Heater connected successfully");
+    LOG_INFO("AstrAlim Heater connected successfully (safety: heaters OFF)");
     return true;
 }
 
