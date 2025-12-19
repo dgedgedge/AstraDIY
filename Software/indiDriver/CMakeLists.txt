@@ -1,66 +1,67 @@
-cmake_minimum_required(VERSION 2.4.7)
-PROJECT(indi-astralim-diy CXX C)
+cmake_minimum_required(VERSION 3.16)
+project(indi-astralim CXX C)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/")
 
 include(GNUInstallDirs)
 
-set (VERSION_MAJOR 2)
-set (VERSION_MINOR 10)
+set(INDI_ASTRALIM_VERSION_MAJOR 3)
+set(INDI_ASTRALIM_VERSION_MINOR 0)
 
 find_package(INDI REQUIRED)
+find_package(PkgConfig REQUIRED)
+
+# Check for libgpiod - support both v1 and v2
+pkg_check_modules(GPIOD REQUIRED libgpiod)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/indi_astralim_system.xml.cmake ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim_system.xml)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/indi_astralim_focuser.xml.cmake ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim_focuser.xml)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/indi_astralim_relays.xml.cmake ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim_relays.xml)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/indi_astralim.xml.cmake ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim.xml)
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${INDI_INCLUDE_DIR})
+include_directories(${GPIOD_INCLUDE_DIRS})
 
-include(CMakeCommon)
+link_directories(${GPIOD_LIBRARY_DIRS})
 
-set(GPIO_LIBRARIES "libgpiod.so")
+# Compiler flags
+add_compile_options(-Wall -Wextra -Wpedantic)
 
-################ astralim System ################
-set(indi_astralim_system_SRCS
-        ${CMAKE_CURRENT_SOURCE_DIR}/astralim_system.cpp
-   )
+# Shared GPIO library
+set(gpio_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/astralim_gpio.cpp)
 
-IF (UNITY_BUILD)
-    ENABLE_UNITY_BUILD(indi_astralim_system indi_astralim_system_SRCS 6 cpp)
-ENDIF ()
+################ AstrAlim Focuser ################
+add_executable(indi_astralim_focuser
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_focuser.cpp
+    ${gpio_SRCS}
+)
+target_link_libraries(indi_astralim_focuser ${INDI_LIBRARIES} ${GPIOD_LIBRARIES})
+install(TARGETS indi_astralim_focuser RUNTIME DESTINATION bin)
 
-add_executable(indi_astralim_system ${indi_astralim_system_SRCS})
+################ AstrAlim Relays ################
+add_executable(indi_astralim_relays
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_relays.cpp
+    ${gpio_SRCS}
+)
+target_link_libraries(indi_astralim_relays ${INDI_LIBRARIES} ${GPIOD_LIBRARIES})
+install(TARGETS indi_astralim_relays RUNTIME DESTINATION bin)
+
+################ AstrAlim System ################
+add_executable(indi_astralim_system
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_system.cpp
+)
 target_link_libraries(indi_astralim_system ${INDI_LIBRARIES})
-install(TARGETS indi_astralim_system RUNTIME DESTINATION bin )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim_system.xml DESTINATION ${INDI_DATA_DIR})
+install(TARGETS indi_astralim_system RUNTIME DESTINATION bin)
 
-################ astralim Focuser ################
-set(indi_astralim_focuser_SRCS
-        ${CMAKE_CURRENT_SOURCE_DIR}/astralim_focuser.cpp
-   )
+################ AstrAlim Heater ################
+add_executable(indi_astralim_heater
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_heater.cpp
+)
+target_link_libraries(indi_astralim_heater ${INDI_LIBRARIES})
+install(TARGETS indi_astralim_heater RUNTIME DESTINATION bin)
 
-IF (UNITY_BUILD)
-    ENABLE_UNITY_BUILD(indi_astralim_focuser indi_astralim_focuser_SRCS 6 cpp)
-ENDIF ()
-
-add_executable(indi_astralim_focuser ${indi_astralim_focuser_SRCS})
-target_link_libraries(indi_astralim_focuser ${INDI_DRIVER_LIBRARIES} ${GPIO_LIBRARIES})
-install(TARGETS indi_astralim_focuser RUNTIME DESTINATION bin )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim_focuser.xml DESTINATION ${INDI_DATA_DIR})
-
-################ astralim Relays ################
-set(indi_astralim_relays_SRCS
-        ${CMAKE_CURRENT_SOURCE_DIR}/astralim_relays.cpp
-   )
-
-IF (UNITY_BUILD)
-    ENABLE_UNITY_BUILD(indi_astralim_relays indi_astralim_relays_SRCS 6 cpp)
-ENDIF ()
-
-add_executable(indi_astralim_relays ${indi_astralim_relays_SRCS})
-target_link_libraries(indi_astralim_relays ${INDI_LIBRARIES} ${GPIO_LIBRARIES})
-install(TARGETS indi_astralim_relays RUNTIME DESTINATION bin )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim_relays.xml DESTINATION ${INDI_DATA_DIR})
+################ XML Driver Description ################
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim.xml DESTINATION ${INDI_DATA_DIR})

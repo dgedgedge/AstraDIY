@@ -1,7 +1,7 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 # GPIO used PA17
 import logging
-from ina219 import INA219
+from lib.ina219 import INA219
 import threading
 import time
 
@@ -33,18 +33,30 @@ class AstraInaFetcher(threading.Thread):
         while self.running:
             ina:AstraIna=None
             time.sleep(0.4)
-            with self.listInalock:
-                totalEnergiemWS:float=0.0
-                for ina in self.listIna:
-                    ina.sendConfiguration()
-                
-                time.sleep(0.1)
+            try:
+                with self.listInalock:
+                    totalEnergiemWS:float=0.0
+                    for ina in self.listIna:
+                        try:
+                            ina.sendConfiguration()
+                        except Exception as e:
+                            # Ignorer les erreurs individuelles pour ne pas bloquer les autres capteurs
+                            pass
+                    
+                    time.sleep(0.1)
 
-                for ina in self.listIna:
-                    ina.getDataFromIna()
-                    totalEnergiemWS+=ina.energiemWS()
-                    #print(ina["address"]," voltage", ina["voltage"])
-                self.totalEnergiemWS=totalEnergiemWS
+                    for ina in self.listIna:
+                        try:
+                            ina.getDataFromIna()
+                            totalEnergiemWS+=ina.energiemWS()
+                        except Exception as e:
+                            # Ignorer les erreurs individuelles pour ne pas bloquer les autres capteurs
+                            pass
+                    self.totalEnergiemWS=totalEnergiemWS
+            except Exception as e:
+                # En cas d'erreur générale, continuer la boucle
+                time.sleep(0.5)
+                pass
 
     def stop(self):
         self.running=False
@@ -167,19 +179,32 @@ class AstraIna:
         """
         pingOk=False
         self.configurationSend=False
-        if self.ina219.ping():
-            pingOk=True
-            if self.firstPing:
-                self.firstPing=False
-                self._lasttimeS = time.perf_counter()
-                self.firstttime= time.perf_counter()
-        if pingOk:
-            self.ina219.configure(
-                voltage_range=self.voltage_range, 
-                gain=self.gain, 
-                bus_adc=self.bus_adc, 
-                shunt_adc=self.shunt_adc)
-            self.configurationSend = True            
+        try:
+            if self.ina219.ping():
+                pingOk=True
+                if self.firstPing:
+                    self.firstPing=False
+                    self._lasttimeS = time.perf_counter()
+                    self.firstttime= time.perf_counter()
+            if pingOk:
+                try:
+                    self.ina219.configure(
+                        voltage_range=self.voltage_range, 
+                        gain=self.gain, 
+                        bus_adc=self.bus_adc, 
+                        shunt_adc=self.shunt_adc)
+                    self.configurationSend = True
+                except (OSError, IOError) as e:
+                    # Erreur I2C - le capteur peut être temporairement indisponible
+                    self.pingOk = False
+                    self.configurationSend = False
+                    # Ne pas logger pour éviter le spam, juste ignorer silencieusement
+                    pass
+        except (OSError, IOError) as e:
+            # Erreur I2C lors du ping
+            self.pingOk = False
+            self.configurationSend = False
+            pass            
         
     def getPingOK(self)->bool:
         """
@@ -196,17 +221,24 @@ class AstraIna:
         It is considered that the last measure OK is cummulated in the energy.
         """
         if self.configurationSend:
-            curtimeS=time.perf_counter()
-            deltatimeS=curtimeS-self._lasttimeS
-            if not self.ina219.current_overflow():
-                self._shuntVoltagemV = max(self.ina219.shunt_voltage(), 0.0)
-                self._voltageV = max(float(self.ina219.voltage()),0.0)
-                self._currentmA = max(float(self.ina219.current()), 0.0)
-                self._powermW = max(float(self.ina219.power()),0.0)
-            energiemWS=self._powermW * deltatimeS
-            self._energiemWS += energiemWS
-            self._lasttimeS=curtimeS
-            self._intPeriodS=curtimeS-self.firstttime
+            try:
+                curtimeS=time.perf_counter()
+                deltatimeS=curtimeS-self._lasttimeS
+                if not self.ina219.current_overflow():
+                    self._shuntVoltagemV = max(self.ina219.shunt_voltage(), 0.0)
+                    self._voltageV = max(float(self.ina219.voltage()),0.0)
+                    self._currentmA = max(float(self.ina219.current()), 0.0)
+                    self._powermW = max(float(self.ina219.power()),0.0)
+                energiemWS=self._powermW * deltatimeS
+                self._energiemWS += energiemWS
+                self._lasttimeS=curtimeS
+                self._intPeriodS=curtimeS-self.firstttime
+                self.pingOk = True
+            except (OSError, IOError) as e:
+                # Erreur I2C - le capteur peut être temporairement indisponible
+                self.pingOk = False
+                # Conserver les dernières valeurs valides
+                pass
     
     def configure(self, voltage_range=INA219.RANGE_16V, gain=INA219.GAIN_AUTO, bus_adc=INA219.ADC_12BIT, shunt_adc=INA219.ADC_12BIT):
         if self.configured:
@@ -216,8 +248,10 @@ class AstraIna:
             self.gain=gain
             self.bus_adc=bus_adc
             self.shunt_adc=shunt_adc
+            print(f"[DEBUG AstraIna.configure] {self.name}: Ajout au fetcher (address=0x{self.address:x})")
             self.AstraInaFetcher.setIna(self)
             self.configured=True
+            print(f"[DEBUG AstraIna.configure] {self.name}: Configuré et ajouté au fetcher")
 
     
     def getName(self)->str:

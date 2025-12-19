@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 
 """Library for the INA219 current and power monitor from Texas Instruments.
 

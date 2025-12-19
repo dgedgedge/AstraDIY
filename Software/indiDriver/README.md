@@ -1,132 +1,48 @@
-# This project Was copied frim Astroberry and specialized for AstrAlim hardware. 
-# AstrAlim DIY
-AstrAlim DIY provides the INDI drivers for Raspberry Pi devices:
-* AstrAlim Focuser - stepper motor driver with absolute and relative position capabilities and autofocus with INDI client such as KStars and Ekos
-* AstrAlim Relays - relays switch board allowing for remote switching up to 4 devices
-* AstrAlim System - system parameters monitoring and system control
+# AstrAlim INDI Driver v3
 
-Features:
-* AstrAlim Focuser
-  - Support for virtually any stepper motor, including Moonlite, Robofocus
-  - Support for DRV8834 and A4988 stepper controllers
-  - Direct stepper motor control without proprietary drivers
-  - Customizable GPIO pins
-  - Absolute position control
-  - Relative position control
-  - Forward / Reverse direction configuration
-  - Customizable maximum absolute position (steps)
-  - Customizable maximum focuser travel (mm)
-  - Resolution control from full step to 1/32 microsteps
-  - Backlash compensation
-  - Speed control
-  - Focuser info including: critical focus zone in μm, step size in μm, steps per critical focus zone
-  - Automatic temperature compensation based on DS18B20 temperature sensor
-* AstrAlim Relays
-  - Support for virtually any relay controlled from GPIO
-  - Up to 8 relay switches
-  - Customizable GPIO pins
-  - Configurable Active state
-  - Configurable labels
-* AstrAlim System
-  - Provides system information such as local system time, UTC offset, hardware identification, CPU temperature, uptime, system load, hostname, local IP, public IP
-  - Allows for system restart and shut down (Supported on linux operating system only. Requires advanced configuration of sudo to allow restart & shutdown without password)
+Driver INDI modernisé pour la carte AstrAlim sur Raspberry Pi 5.
 
-# Source
-https://github.com/rkaczorek/astroberry-diy
+## Prérequis
 
-# Requirements
-* INDI available here http://indilib.org/download.html
-* CMake >= 2.4.7
-
-# Installation
-If you use [astroberry software repository](https://www.astroberry.io/repo/) just run:
-```
-sudo apt-get install indi-astroberry-diy
+Sur le RPi5/StellarMate :
+```bash
+sudo apt-get update
+sudo apt-get install build-essential cmake libindi-dev libgpiod-dev
 ```
 
-Otherwide you need to compile the software from sources.
+## Compilation
 
-Download and install required libraries before compiling Astroberry DIY. See [INDI site](http://indilib.org/download.html) for more details.
-In most cases it's enough to run:
-```
-sudo apt-get install cmake libindi-dev libgpiod-dev
-```
-Then you can compile the driver:
-```
-git clone https://github.com/rkaczorek/astroberry-diy.git
-cd astroberry-diy
+```bash
 mkdir build && cd build
-cmake -DCMAKE_INSTALL_PREFIX=/usr ..
+cmake ..
 make
-```
-You can install the drivers by running:
-```
 sudo make install
 ```
-OR manually installing files by running:
-```
-sudo copy indi_astroberry_focuser /usr/bin/
-sudo copy indi_astroberry_relays /usr/bin/
-sudo copy indi_astroberry_system /usr/bin/
-sudo copy indi_astroberry_focuser.xml /usr/share/indi/
-sudo copy indi_astroberry_relays.xml /usr/share/indi/
-sudo copy indi_astroberry_system.xml /usr/share/indi/
 
-```
+## Modules
 
-# How to use it?
-Enable 1-Wire interface using raspi-config or adding 'dtoverlay=w1-gpio' to /boot/configure.txt for temperature compensation support (reboot required). Run Kstars and select Astroberry Focuser (Focuser section) and/or Astroberry Relays (Aux section) and/or Astroberry System (Aux section) in Ekos profile editor. Then start INDI server in Ekos with your profile, containg Astroberry drivers. Alternatively you can start INDI server manually by running:
-```
-indi_server indi_astroberry_focuser indi_astroberry_relays indi_astroberry_system
-```
-Start KStars with Ekos, connect to your INDI server and enjoy!
+- **AstrAlim Focuser** : Contrôle moteur pas-à-pas (DRV8834/A4988)
+- **AstrAlim Relays** : 3 sorties DC commutables
+- **AstrAlim System** : Infos système RPi
 
-Note that your user account needs proper access right to /dev/gpiochip0 device. By default you can read/write only if you run driver as root or user who is a member of gpio group. Add your user to gpio group by running ```sudo usermod -a -G gpio $USER```
+## GPIO (BCM - RPi5)
 
-To use restart/shutdown functionality add this line to your /etc/sudoers file or /etc/sudoers.d/010_astroberry-nopasswd (this assumes you run INDI server as astroberry user):
-```
-astroberry ALL=(ALL) NOPASSWD: /sbin/reboot, /sbin/poweroff
-```
+| Fonction | Pin |
+|----------|-----|
+| DIR      | 10  |
+| STEP     | 24  |
+| SLEEP    | 23  |
+| M1       | 11  |
+| M2       | 7   |
+| M3       | 5   |
+| DC1      | 26  |
+| DC2      | 20  |
+| DC3      | 21  |
 
-For custom labels you need to save configuration and restart the driver after changing relays' labels.
+## Changements v3
 
-# What hardware is needed for Astroberry DIY drivers?
+- API INDI moderne (PropertyNumber, PropertySwitch)
+- Support libgpiod v1 et v2
+- Compatibilité RPi5 (/dev/gpiochip4)
+- C++17
 
-1. Astroberry Focuser
-* A stepper motor
-* Stepper motor controller - DRV8834 and A4988 are supported
-  Starting from version 2.5 you can set your own BCM Pins on Options Tab!
-  Default Motor Controller to Raspberry Pi GPIO wiring from v2.6 (changed!):
-   - BCM23 / PIN16 - DIR
-   - BCM24 / PIN18 - STEP
-   - BCM22 / PIN15 - SLEEP + RST
-   - BCM17 / PIN11 - M1/M0
-   - BCM18 / PIN12 - M2/M1
-   - BCM27 / PIN13 - M3/-
-
-  Default Motor Controller to Raspberry Pi GPIO wiring before v2.6:
-   - BCM04 / PIN7 - DIR
-   - BCM17 / PIN11 - STEP
-   - BCM23 / PIN16 - SLEEP + RST
-   - BCM22 / PIN15 - M1/M0
-   - BCM27 / PIN13 - M2/M1
-   - BCM24 / PIN18 - M3/-
-
-   Note: Make sure you connect the stepper motor correctly to the controller (B2, B1 and A2, A1 pins on the controller).
-         Remember to protect the power line connected to VMOT of the motor controller with 100uF capacitor.
-* DS18B20 temperature sensor connected to BCM4 / PIN7 for temperature reading and automatic temperature compensation
-   Note: You need to use external 4k7 ohm pull-up resistor connected to data pin of DS18B20 sensor
-
-2. Astroberry Relays
-* Relay switch board eg. Waveshare RPi Relay Board (B)
-  Default pins, each switching ON/OFF a relay (active-low). Starting from version 2.5 you can set your own BCM Pins on Options Tab!
-   - BCM05 / PIN29 - IN1
-   - BCM06 / PIN31 - IN2
-   - BCM13 / PIN33 - IN3
-   - BCM16 / PIN36 - IN4
-   - BCM19 / PIN35 - IN5
-   - BCM20 / PIN38 - IN6
-   - BCM21 / PIN40 - IN7
-   - BCM26 / PIN37 - IN8
-
-   Note: All inputs are set to HIGH by default. Most relay boards require input to be LOW to swich ON a line.

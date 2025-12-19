@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 import sys
 import math
 from PyQt5.QtCore import QTimer

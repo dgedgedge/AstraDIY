@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 import subprocess
 
 def get_chronyc_tracking_data():

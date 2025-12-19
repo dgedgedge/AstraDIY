@@ -1,0 +1,15 @@
+# Devices gpsd should collect to at boot time.
+# They need to be read/writeable, either by user gpsd or the group dialout.
+DEVICES="/dev/ttyAMA0"
+
+# Start the gpsd daemon automatically at boot ti
+START_DAEMON="true"
+
+# Other options you want to pass to gpsd
+#GPSD_OPTIONS="-n -b "
+GPSD_OPTIONS="-n -b -s 115200"
+#GPSD_OPTIONS="-n -b -s 57600"
+GPSD_SOCKET="/var/run/gpsd.sock"
+
+# Automatically hot add/remove USB GPS devices via gpsdctl
+USBAUTO="true"

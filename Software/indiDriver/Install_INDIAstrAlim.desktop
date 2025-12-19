@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Installer Drivers INDI AstrAlim
+Comment=Compile et installe les drivers INDI pour AstrAlim
+Exec=bash -c "cd \"$(dirname \"%k\")\" && ./Install_INDIAstrAlim_Desktop.sh"
+Icon=application-x-executable
+Terminal=true
+Categories=System;Settings;
+StartupNotify=true
+Path=
+

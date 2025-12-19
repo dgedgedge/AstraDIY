@@ -1,0 +1,28 @@
+[all]
+# Begin gps
+# /dev/pps0
+dtoverlay=pps-gpio,gpiopin=25
+dtparam=uart0=on
+# End GPS
+
+# Start TeenAstro
+dtoverlay=uart3-pi5
+# End TeenAstro
+
+# 1wire  temperature prob
+dtoverlay=w1-gpio
+# 1wire  temperature prob
+
+# Begin Astralim PWM Outputs
+dtoverlay=pwm-2chan,pin=18,func=2,pin2=13,func2=4
+# End Astralim PWM Outputs
+
+# Begin For RTC batterie powering
+dtparam=rtc_bbat_vchg=3000000
+# End For RTC batterie powering
+
+# Enable the PCIe external connector.
+dtparam=pciex1
+# Force Gen 3.0 speeds
+dtparam=pciex1_gen=3
+

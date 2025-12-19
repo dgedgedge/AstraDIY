@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 import sys
 import os
 import signal
@@ -85,7 +85,7 @@ class dataMenu(QWidget):
                         background: transparent;
                         background-color: transparent;
                         border: none;
-                        color: black;
+                        color: #1f2937;
                     }
                 """)
             else:
@@ -93,15 +93,19 @@ class dataMenu(QWidget):
                 self.line_edit.setStyleSheet("""
                     QLineEdit {
                         background: transparent;
-                        background-color: #f75457;
-                        border: none;
-                        color: black;
+                        background-color: #fee2e2;
+                        border: 1px solid #fca5a5;
+                        border-radius: 4px;
+                        color: #991b1b;
                     }
                 """)
         else:
             self.line_edit.setStyleSheet("""
                 QLineEdit {
-                    border: 1px solid black;
+                    border: 1px solid #d1d5db;
+                    border-radius: 5px;
+                    background-color: #ffffff;
+                    color: #1f2937;
                 }
             """)
             
@@ -130,14 +134,14 @@ class AnimatedToggleButton(QWidget):
         # Background
         self.background = QPushButton('', self)
         self.background.setFixedSize(self.size*2, self.size)
-        self.background.setStyleSheet("background-color: lightgray; border-radius: "+self.radius+"px;")
+        self.background.setStyleSheet("background-color: #d1d5db; border-radius: "+self.radius+"px; border: 1px solid #9ca3af;")
         self.background.setCheckable(True)
         self.background.clicked.connect(self._toggle)
         
         # Slider
         self.slider = QPushButton('', self)
         self.slider.setFixedSize(self.size, self.size)
-        self.slider.setStyleSheet("background-color: white; border-radius: "+self.radius+"px;")
+        self.slider.setStyleSheet("background-color: #ffffff; border-radius: "+self.radius+"px; border: 1px solid #e5e7eb; font-size: 8px; font-weight: bold;")
         self.slider.setEnabled(True)
         self.slider.clicked.connect(self._toggle)
 
@@ -164,13 +168,15 @@ class AnimatedToggleButton(QWidget):
         if state:
             self.animation.setStartValue(QRect(0, 0, self.size, self.size))
             self.animation.setEndValue(QRect(self.size, 0, self.size, self.size))
-            self.background.setStyleSheet("background-color: green; border-radius: "+self.radius+"px;")
-            self.slider.setText('On')
+            self.background.setStyleSheet("background-color: #10b981; border-radius: "+self.radius+"px; border: 1px solid #059669;")
+            self.slider.setStyleSheet("background-color: #ffffff; border-radius: "+self.radius+"px; border: 1px solid #e5e7eb; font-size: 7px; font-weight: 600; color: #10b981;")
+            self.slider.setText('ON')
         else:
             self.animation.setStartValue(QRect(self.size, 0, self.size, self.size))
             self.animation.setEndValue(QRect(0, 0, self.size, self.size))
-            self.background.setStyleSheet("background-color: red; border-radius: "+self.radius+"px;")
-            self.slider.setText('Off')
+            self.background.setStyleSheet("background-color: #ef4444; border-radius: "+self.radius+"px; border: 1px solid #dc2626;")
+            self.slider.setStyleSheet("background-color: #ffffff; border-radius: "+self.radius+"px; border: 1px solid #e5e7eb; font-size: 7px; font-weight: 600; color: #ef4444;")
+            self.slider.setText('OFF')
         self.animation.start()
 
     def _updateUIAndCallback(self, state):

@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 import gps
 import ntplib
 import time
@@ -103,6 +103,12 @@ class AstraGps(threading.Thread):
             cls._AstraGps = AstraGps()
             cls._AstraGps.start()
         return cls._AstraGps
+
+    def stop(self):
+        """Arrête le thread GPS"""
+        self.running = False
+        self.join()
+        AstraGps._AstraGps = None
 
     @classmethod
     def exitAll(cls):

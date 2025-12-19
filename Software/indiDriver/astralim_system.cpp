@@ -1,393 +1,262 @@
 /*******************************************************************************
-  Copyright(c) 2015-2020 Radek Kaczorek  <rkaczorek AT gmail DOT com>
-
- This library is free software; you can redistribute it and/or
- modify it under the terms of the GNU Library General Public
- License version 2 as published by the Free Software Foundation.
- .
- This library is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- Library General Public License for more details.
- .
- You should have received a copy of the GNU Library General Public License
- along with this library; see the file COPYING.LIB.  If not, write to
- the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- Boston, MA 02110-1301, USA.
-*******************************************************************************/
-
-#include <stdio.h>
-#include <memory>
-#include <string.h>
-#include "config.h"
+ * AstrAlim System Driver - Modern INDI API Implementation
+ * Copyright (c) 2024 AstrAlim Project
+ * Based on original work by Radek Kaczorek
+ ******************************************************************************/
 
 #include "astralim_system.h"
+#include "config.h"
 
-#include <gpiod.h>
+#include <cstring>
+#include <ctime>
+#include <array>
+#include <memory>
 
-// We declare an auto pointer to IndiAstrAlimSystem
-std::unique_ptr<IndiAstrAlimSystem> indiAstrAlimSystem(new IndiAstrAlimSystem());
+// Singleton instance
+static std::unique_ptr<AstrAlimSystem> systemInstance(new AstrAlimSystem());
 
-
-void ISPoll(void *p);
-
-void ISInit()
+AstrAlimSystem::AstrAlimSystem()
 {
-	static int isInit = 0;
-
-	if (isInit == 1)
-		return;
-	if(indiAstrAlimSystem.get() == 0)
-	{
-		isInit = 1;
-		indiAstrAlimSystem.reset(new IndiAstrAlimSystem());
-	}
+    setVersion(INDI_ASTRALIM_VERSION_MAJOR, INDI_ASTRALIM_VERSION_MINOR);
 }
 
-void ISGetProperties(const char *dev)
+const char* AstrAlimSystem::getDefaultName()
 {
-        ISInit();
-        indiAstrAlimSystem->ISGetProperties(dev);
+    return "AstrAlim System";
 }
 
-void ISNewSwitch(const char *dev, const char *name, ISState *states, char *names[], int num)
+bool AstrAlimSystem::initProperties()
 {
-        ISInit();
-        indiAstrAlimSystem->ISNewSwitch(dev, name, states, names, num);
+    INDI::DefaultDevice::initProperties();
+    
+    // System Time
+    SysTimeTP[0].fill("LOCAL_TIME", "Local Time", nullptr);
+    SysTimeTP[1].fill("UTC_OFFSET", "UTC Offset", nullptr);
+    SysTimeTP.fill(getDeviceName(), "SYSTEM_TIME", "System Time", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+    
+    // System Info
+    SysInfoTP[0].fill("HARDWARE", "Hardware", nullptr);
+    SysInfoTP[1].fill("CPU_TEMP", "CPU Temp (°C)", nullptr);
+    SysInfoTP[2].fill("UPTIME", "Uptime", nullptr);
+    SysInfoTP[3].fill("LOAD", "Load (1/5/15 min)", nullptr);
+    SysInfoTP[4].fill("HOSTNAME", "Hostname", nullptr);
+    SysInfoTP[5].fill("LOCAL_IP", "Local IP", nullptr);
+    SysInfoTP.fill(getDeviceName(), "SYSTEM_INFO", "System Info", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+    
+    // System Control
+    SysControlSP[CTRL_REBOOT].fill("REBOOT", "Reboot", ISS_OFF);
+    SysControlSP[CTRL_SHUTDOWN].fill("SHUTDOWN", "Shutdown", ISS_OFF);
+    SysControlSP.fill(getDeviceName(), "SYSTEM_CONTROL", "System Control", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+    
+    // Confirmation dialog
+    SysConfirmSP[CONFIRM_YES].fill("CONFIRM_YES", "Yes", ISS_OFF);
+    SysConfirmSP[CONFIRM_NO].fill("CONFIRM_NO", "No", ISS_OFF);
+    SysConfirmSP.fill(getDeviceName(), "CONFIRM_ACTION", "Confirm?", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+    
+    addDebugControl();
+    setDefaultPollingPeriod(POLL_INTERVAL_MS);
+    
+    return true;
 }
 
-void ISNewText(	const char *dev, const char *name, char *texts[], char *names[], int num)
+bool AstrAlimSystem::updateProperties()
 {
-        ISInit();
-        indiAstrAlimSystem->ISNewText(dev, name, texts, names, num);
+    INDI::DefaultDevice::updateProperties();
+    
+    if (isConnected())
+    {
+        defineProperty(SysTimeTP);
+        defineProperty(SysInfoTP);
+        defineProperty(SysControlSP);
+    }
+    else
+    {
+        deleteProperty(SysTimeTP);
+        deleteProperty(SysInfoTP);
+        deleteProperty(SysControlSP);
+        deleteProperty(SysConfirmSP);
+    }
+    
+    return true;
 }
 
-void ISNewNumber(const char *dev, const char *name, double values[], char *names[], int num)
+bool AstrAlimSystem::Connect()
 {
-        ISInit();
-        indiAstrAlimSystem->ISNewNumber(dev, name, values, names, num);
+    // Get initial system info
+    updateSystemInfo();
+    
+    // Start timer
+    SetTimer(POLL_INTERVAL_MS);
+    
+    LOG_INFO("AstrAlim System connected");
+    return true;
 }
 
-void ISNewBLOB (const char *dev, const char *name, int sizes[], int blobsizes[], char *blobs[], char *formats[], char *names[], int num)
+bool AstrAlimSystem::Disconnect()
 {
-	INDI_UNUSED(dev);
-	INDI_UNUSED(name);
-	INDI_UNUSED(sizes);
-	INDI_UNUSED(blobsizes);
-	INDI_UNUSED(blobs);
-	INDI_UNUSED(formats);
-	INDI_UNUSED(names);
-	INDI_UNUSED(num);
+    LOG_INFO("AstrAlim System disconnected");
+    return true;
 }
 
-void ISSnoopDevice (XMLEle *root)
+void AstrAlimSystem::TimerHit()
 {
-	ISInit();
-	indiAstrAlimSystem->ISSnoopDevice(root);
+    if (!isConnected())
+        return;
+    
+    // Update time every tick
+    updateTime();
+    
+    // Update system info less frequently
+    if (++pollCounter >= INFO_UPDATE_CYCLES)
+    {
+        updateSystemInfo();
+        pollCounter = 0;
+    }
+    
+    SetTimer(POLL_INTERVAL_MS);
 }
 
-IndiAstrAlimSystem::IndiAstrAlimSystem()
+void AstrAlimSystem::updateTime()
 {
-	setVersion(VERSION_MAJOR,VERSION_MINOR);
+    time_t rawtime;
+    time(&rawtime);
+    struct tm* local_time = localtime(&rawtime);
+    
+    char timeStr[32];
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%S", local_time);
+    SysTimeTP[0].setText(timeStr);
+    
+    char offsetStr[16];
+    snprintf(offsetStr, sizeof(offsetStr), "%+.2f", local_time->tm_gmtoff / 3600.0);
+    SysTimeTP[1].setText(offsetStr);
+    
+    SysTimeTP.setState(IPS_OK);
+    SysTimeTP.apply();
 }
 
-IndiAstrAlimSystem::~IndiAstrAlimSystem()
+void AstrAlimSystem::updateSystemInfo()
 {
+    SysInfoTP.setState(IPS_BUSY);
+    SysInfoTP.apply();
+    
+    // Hardware model
+    std::string hw = execCommand("cat /sys/firmware/devicetree/base/model 2>/dev/null");
+    if (!hw.empty()) hw.pop_back(); // Remove trailing newline
+    SysInfoTP[0].setText(hw.c_str());
+    
+    // CPU temperature
+    std::string temp = execCommand("cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null");
+    if (!temp.empty())
+    {
+        int tempMilliC = std::stoi(temp);
+        char tempStr[16];
+        snprintf(tempStr, sizeof(tempStr), "%d", tempMilliC / 1000);
+        SysInfoTP[1].setText(tempStr);
+    }
+    
+    // Uptime
+    std::string uptime = execCommand("uptime -p 2>/dev/null | sed 's/up //'");
+    if (!uptime.empty()) uptime.pop_back();
+    SysInfoTP[2].setText(uptime.c_str());
+    
+    // Load average
+    std::string load = execCommand("cat /proc/loadavg 2>/dev/null | awk '{print $1\" / \"$2\" / \"$3}'");
+    if (!load.empty()) load.pop_back();
+    SysInfoTP[3].setText(load.c_str());
+    
+    // Hostname
+    std::string hostname = execCommand("hostname 2>/dev/null");
+    if (!hostname.empty()) hostname.pop_back();
+    SysInfoTP[4].setText(hostname.c_str());
+    
+    // Local IP
+    std::string ip = execCommand("hostname -I 2>/dev/null | awk '{print $1}'");
+    if (!ip.empty()) ip.pop_back();
+    SysInfoTP[5].setText(ip.c_str());
+    
+    SysInfoTP.setState(IPS_OK);
+    SysInfoTP.apply();
 }
 
-bool IndiAstrAlimSystem::Connect()
+std::string AstrAlimSystem::execCommand(const char* cmd)
 {
-	SetTimer(1000);
-	IDMessage(getDeviceName(), "AstrAlim System connected successfully.");
-
-	// Get basic system info
-	FILE* pipe;
-	char buffer[128];
-
-	//update Hardware
-	//https://www.raspberrypi.org/documentation/hardware/raspberrypi/revision-codes/README.md
-	pipe = popen("cat /sys/firmware/devicetree/base/model", "r");
-	fgets(buffer, 128, pipe);
-	pclose(pipe);
-	IUSaveText(&SysInfoT[0], buffer);
-
-	//update CPU temp
-	pipe = popen("echo $(($(cat /sys/class/thermal/thermal_zone0/temp)/1000))", "r");
-	fgets(buffer, 128, pipe);
-	pclose(pipe);
-	IUSaveText(&SysInfoT[1], buffer);
-
-	//update uptime
-	pipe = popen("uptime|awk -F, '{print $1}'|awk -Fup '{print $2}'|xargs", "r");
-	fgets(buffer, 128, pipe);
-	pclose(pipe);
-	IUSaveText(&SysInfoT[2], buffer);
-
-	//update load
-	pipe = popen("uptime|awk -F, '{print $3\" /\"$4\" /\"$5}'|awk -F: '{print $2}'|xargs", "r");
-	fgets(buffer, 128, pipe);
-	pclose(pipe);
-	IUSaveText(&SysInfoT[3], buffer);
-
-	//update Hostname
-	pipe = popen("hostname", "r");
-	fgets(buffer, 128, pipe);
-	pclose(pipe);
-	IUSaveText(&SysInfoT[4], buffer);
-
-	//update Local IP
-	pipe = popen("hostname -I|awk -F' '  '{print $1}'|xargs", "r");
-	fgets(buffer, 128, pipe);
-	pclose(pipe);
-	IUSaveText(&SysInfoT[5], buffer);
-
-	//update Public IP
-	pipe = popen("wget -qO- http://ipecho.net/plain|xargs", "r");
-	fgets(buffer, 128, pipe);
-	pclose(pipe);
-	IUSaveText(&SysInfoT[6], buffer);
-
-	// Update client
-	IDSetText(&SysInfoTP, NULL);
-
-	return true;
-}
-bool IndiAstrAlimSystem::Disconnect()
-{
-	IDMessage(getDeviceName(), "AstrAlim System disconnected successfully.");
-	return true;
-}
-void IndiAstrAlimSystem::TimerHit()
-{
-	if(isConnected())
-	{
-		// update time
-		struct tm *local_timeinfo;
-		static char ts[32];
-		time_t rawtime;
-		time(&rawtime);
-		local_timeinfo = localtime (&rawtime);
-		strftime(ts, 20, "%Y-%m-%dT%H:%M:%S", local_timeinfo);
-		IUSaveText(&SysTimeT[0], ts);
-		snprintf(ts, sizeof(ts), "%4.2f", (local_timeinfo->tm_gmtoff/3600.0));
-		IUSaveText(&SysTimeT[1], ts);
-		SysTimeTP.s = IPS_OK;
-		IDSetText(&SysTimeTP, NULL);
-
-		if (polling++ > 59)
-		{
-			FILE* pipe;
-			char buffer[128];
-
-			SysInfoTP.s = IPS_BUSY;
-			IDSetText(&SysInfoTP, NULL);
-
-			//update CPU temp
-			pipe = popen("echo $(($(cat /sys/class/thermal/thermal_zone0/temp)/1000))", "r");
-			fgets(buffer, 128, pipe);
-			pclose(pipe);
-			IUSaveText(&SysInfoT[1], buffer);
-
-			//update uptime
-			pipe = popen("uptime|awk -F, '{print $1}'|awk -Fup '{print $2}'|xargs", "r");
-			fgets(buffer, 128, pipe);
-			pclose(pipe);
-			IUSaveText(&SysInfoT[2], buffer);
-
-			//update load
-			pipe = popen("uptime|awk -F, '{print $3\" /\"$4\" /\"$5}'|awk -F: '{print $2}'|xargs", "r");
-			fgets(buffer, 128, pipe);
-			pclose(pipe);
-			IUSaveText(&SysInfoT[3], buffer);
-
-			SysInfoTP.s = IPS_OK;
-			IDSetText(&SysInfoTP, NULL);
-
-			polling = 0;
-		}
-
-		SetTimer(1000);
-	}
+    std::array<char, 256> buffer;
+    std::string result;
+    
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+    if (!pipe)
+    {
+        return "";
+    }
+    
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
+    {
+        result += buffer.data();
+    }
+    
+    return result;
 }
 
-const char * IndiAstrAlimSystem::getDefaultName()
+bool AstrAlimSystem::ISNewSwitch(const char* dev, const char* name, ISState* states, char* names[], int n)
 {
-        return (char *)"AstrAlim System";
+    if (dev && strcmp(dev, getDeviceName()) == 0)
+    {
+        // System control
+        if (SysControlSP.isNameMatch(name))
+        {
+            SysControlSP.update(states, names, n);
+            SysControlSP.setState(IPS_BUSY);
+            SysControlSP.apply();
+            
+            if (SysControlSP[CTRL_REBOOT].getState() == ISS_ON)
+            {
+                LOG_WARN("System REBOOT requested. Confirm to proceed.");
+            }
+            else if (SysControlSP[CTRL_SHUTDOWN].getState() == ISS_ON)
+            {
+                LOG_WARN("System SHUTDOWN requested. Confirm to proceed.");
+            }
+            
+            // Show confirmation dialog
+            defineProperty(SysConfirmSP);
+            return true;
+        }
+        
+        // Confirmation
+        if (SysConfirmSP.isNameMatch(name))
+        {
+            SysConfirmSP.update(states, names, n);
+            
+            if (SysConfirmSP[CONFIRM_YES].getState() == ISS_ON)
+            {
+                if (SysControlSP[CTRL_REBOOT].getState() == ISS_ON)
+                {
+                    LOG_WARN("Rebooting system...");
+                    execCommand("sudo reboot");
+                }
+                else if (SysControlSP[CTRL_SHUTDOWN].getState() == ISS_ON)
+                {
+                    LOG_WARN("Shutting down system...");
+                    execCommand("sudo poweroff");
+                }
+            }
+            else
+            {
+                LOG_INFO("Operation cancelled");
+            }
+            
+            // Reset controls
+            SysControlSP.reset();
+            SysControlSP.setState(IPS_IDLE);
+            SysControlSP.apply();
+            
+            SysConfirmSP.reset();
+            deleteProperty(SysConfirmSP);
+            
+            return true;
+        }
+    }
+    
+    return INDI::DefaultDevice::ISNewSwitch(dev, name, states, names, n);
 }
 
-bool IndiAstrAlimSystem::initProperties()
-{
-	// We init parent properties first
-	INDI::DefaultDevice::initProperties();
-
-	IUFillText(&SysTimeT[0],"LOCAL_TIME","Local Time",NULL);
-	IUFillText(&SysTimeT[1],"UTC_OFFSET","UTC Offset",NULL);
-	IUFillTextVector(&SysTimeTP,SysTimeT,2,getDeviceName(),"SYSTEM_TIME","System Time",MAIN_CONTROL_TAB,IP_RO,60,IPS_IDLE);
-
-	IUFillText(&SysInfoT[0],"HARDWARE","Hardware",NULL);
-	IUFillText(&SysInfoT[1],"CPU TEMP","CPU Temp (°C)",NULL);
-	IUFillText(&SysInfoT[2],"UPTIME","Uptime (hh:mm)",NULL);
-	IUFillText(&SysInfoT[3],"LOAD","Load (1 / 5 / 15 min.)",NULL);
-	IUFillText(&SysInfoT[4],"HOSTNAME","Hostname",NULL);
-	IUFillText(&SysInfoT[5],"LOCAL_IP","Local IP",NULL);
-	IUFillText(&SysInfoT[6],"PUBLIC_IP","Public IP",NULL);
-	IUFillTextVector(&SysInfoTP,SysInfoT,7,getDeviceName(),"SYSTEM_INFO","System Info",MAIN_CONTROL_TAB,IP_RO,60,IPS_IDLE);
-
-	IUFillSwitch(&SysControlS[0], "SYSCTRL_REBOOT", "Reboot", ISS_OFF);
-	IUFillSwitch(&SysControlS[1], "SYSCTRL_SHUTDOWN", "Shutdown", ISS_OFF);
-	IUFillSwitchVector(&SysControlSP, SysControlS, 2, getDeviceName(), "SYSCTRL", "System Ctrl", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 0, IPS_IDLE);
-
-	IUFillSwitch(&SysOpConfirmS[0], "SYSOPCONFIRM_CONFIRM", "Yes", ISS_OFF);
-	IUFillSwitch(&SysOpConfirmS[1], "SYSOPCONFIRM_CANCEL", "No", ISS_OFF);
-	IUFillSwitchVector(&SysOpConfirmSP, SysOpConfirmS, 2, getDeviceName(), "SYSOPCONFIRM", "Continue?", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 0, IPS_IDLE);
-
-	return true;
-}
-
-bool IndiAstrAlimSystem::updateProperties()
-{
-	// Call parent update properties first
-	INDI::DefaultDevice::updateProperties();
-
-	if (isConnected())
-	{
-		defineText(&SysTimeTP);
-		defineText(&SysInfoTP);
-		defineSwitch(&SysControlSP);
-	}
-	else
-	{
-		// We're disconnected
-		deleteProperty(SysTimeTP.name);
-		deleteProperty(SysInfoTP.name);
-		deleteProperty(SysControlSP.name);
-	}
-	return true;
-}
-
-void IndiAstrAlimSystem::ISGetProperties(const char *dev)
-{
-	INDI::DefaultDevice::ISGetProperties(dev);
-}
-
-bool IndiAstrAlimSystem::ISNewNumber (const char *dev, const char *name, double values[], char *names[], int n)
-{
-	return INDI::DefaultDevice::ISNewNumber(dev,name,values,names,n);
-}
-
-bool IndiAstrAlimSystem::ISNewSwitch (const char *dev, const char *name, ISState *states, char *names[], int n)
-{
-	// first we check if it's for our device
-	if (!strcmp(dev, getDeviceName()))
-	{
-		// handle system control
-		if (!strcmp(name, SysControlSP.name))
-		{
-			IUUpdateSwitch(&SysControlSP, states, names, n);
-
-			if ( SysControlS[0].s == ISS_ON )
-			{
-				DEBUG(INDI::Logger::DBG_SESSION, "AstrAlim device is set to REBOOT. Confirm or Cancel operation.");
-				SysControlSP.s = IPS_BUSY;
-				IDSetSwitch(&SysControlSP, NULL);
-				
-				// confirm switch
-				defineSwitch(&SysOpConfirmSP);
-
-				return true;
-			}
-			if ( SysControlS[1].s == ISS_ON )
-			{
-				DEBUG(INDI::Logger::DBG_SESSION, "AstrAlim device is set to SHUT DOWN. Confirm or Cancel operation.");
-				SysControlSP.s = IPS_BUSY;
-				IDSetSwitch(&SysControlSP, NULL);
-
-				// confirm switch
-				defineSwitch(&SysOpConfirmSP);
-
-				return true;
-			}
-		}
-
-		// handle system control confirmation
-		if (!strcmp(name, SysOpConfirmSP.name))
-		{
-			IUUpdateSwitch(&SysOpConfirmSP, states, names, n);
-
-			if ( SysOpConfirmS[0].s == ISS_ON )
-			{
-				SysOpConfirmSP.s = IPS_IDLE;
-				IDSetSwitch(&SysOpConfirmSP, NULL);
-				SysOpConfirmS[0].s = ISS_OFF;
-				IDSetSwitch(&SysOpConfirmSP, NULL);
-
-				// execute system operation
-				if (SysControlS[0].s == ISS_ON)
-				{
-					DEBUG(INDI::Logger::DBG_SESSION, "System operation confirmed. System is going to REBOOT now");
-					FILE* pipe;
-					char buffer[512];
-					pipe = popen("sudo reboot", "r");
-					fgets(buffer, 512, pipe);
-					pclose(pipe);
-					DEBUGF(INDI::Logger::DBG_SESSION, "System output: %s", buffer);
-				}
-				if (SysControlS[1].s == ISS_ON)
-				{
-					DEBUG(INDI::Logger::DBG_SESSION, "System operation confirmed. System is going to SHUT DOWN now");
-					FILE* pipe;
-					char buffer[512];
-					pipe = popen("sudo poweroff", "r");
-					fgets(buffer, 512, pipe);
-					pclose(pipe);
-					DEBUGF(INDI::Logger::DBG_SESSION, "System output: %s", buffer);
-				}
-
-				// reset system control buttons
-				SysControlSP.s = IPS_IDLE;
-				IDSetSwitch(&SysControlSP, NULL);
-				SysControlS[0].s = ISS_OFF;
-				SysControlS[1].s = ISS_OFF;
-				IDSetSwitch(&SysControlSP, NULL);
-
-				deleteProperty(SysOpConfirmSP.name);
-				return true;
-			}
-
-			if ( SysOpConfirmS[1].s == ISS_ON )
-			{
-				DEBUG(INDI::Logger::DBG_SESSION, "System operation canceled.");
-				SysOpConfirmSP.s = IPS_IDLE;
-				IDSetSwitch(&SysOpConfirmSP, NULL);
-				SysOpConfirmS[1].s = ISS_OFF;
-				IDSetSwitch(&SysOpConfirmSP, NULL);
-
-				// reset system control buttons
-				SysControlSP.s = IPS_IDLE;
-				IDSetSwitch(&SysControlSP, NULL);
-				SysControlS[0].s = ISS_OFF;
-				SysControlS[1].s = ISS_OFF;
-				IDSetSwitch(&SysControlSP, NULL);
-
-				deleteProperty(SysOpConfirmSP.name);
-				return true;
-			}
-		}
-	}
-	return INDI::DefaultDevice::ISNewSwitch (dev, name, states, names, n);
-}
-
-bool IndiAstrAlimSystem::ISNewText (const char *dev, const char *name, char *texts[], char *names[], int n)
-{
-	return INDI::DefaultDevice::ISNewText (dev, name, texts, names, n);
-}
-
-bool IndiAstrAlimSystem::ISNewBLOB (const char *dev, const char *name, int sizes[], int blobsizes[], char *blobs[], char *formats[], char *names[], int n)
-{
-	return INDI::DefaultDevice::ISNewBLOB (dev, name, sizes, blobsizes, blobs, formats, names, n);
-}
-
-bool IndiAstrAlimSystem::ISSnoopDevice(XMLEle *root)
-{
-	return INDI::DefaultDevice::ISSnoopDevice(root);
-}

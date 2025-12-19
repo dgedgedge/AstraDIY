@@ -1,0 +1,131 @@
+/*******************************************************************************
+ * AstrAlim Heater Driver - Dew Heater Controller
+ * Copyright (c) 2024 AstrAlim Project
+ * 
+ * Features:
+ * - 2 PWM outputs for dew heaters
+ * - 2 DS18B20 1-Wire temperature sensors for heater bands
+ * - 1 BME280/BMP280 I2C sensor for ambient temperature/humidity/pressure
+ * - Dew point calculation
+ * - Automatic PID regulation based on dew point delta
+ ******************************************************************************/
+
+#ifndef ASTRALIM_HEATER_H
+#define ASTRALIM_HEATER_H
+
+#include <defaultdevice.h>
+#include <memory>
+#include <string>
+#include <vector>
+#include <thread>
+#include <atomic>
+
+class AstrAlimHeater : public INDI::DefaultDevice
+{
+public:
+    AstrAlimHeater();
+    virtual ~AstrAlimHeater();
+
+    const char* getDefaultName() override;
+    
+    bool initProperties() override;
+    bool updateProperties() override;
+    
+    bool ISNewNumber(const char* dev, const char* name, double values[], char* names[], int n) override;
+    bool ISNewSwitch(const char* dev, const char* name, ISState* states, char* names[], int n) override;
+    bool ISNewText(const char* dev, const char* name, char* texts[], char* names[], int n) override;
+
+protected:
+    bool Connect() override;
+    bool Disconnect() override;
+    void TimerHit() override;
+    bool saveConfigItems(FILE* fp) override;
+
+private:
+    // PWM control
+    bool initPWM();
+    void closePWM();
+    bool setPWMDuty(int channel, double percent);
+    
+    // Temperature sensors
+    bool readDS18B20Sensors();
+    bool readBME280();
+    double calculateDewPoint(double temp, double humidity);
+    std::vector<std::string> scanDS18B20Devices();
+    
+    // Power monitoring
+    void readINA219();
+    
+    // PID control
+    void runPIDControl(int channel);
+    double computePID(int channel, double setpoint, double current);
+    
+    // Helper
+    std::string execCommand(const char* cmd);
+    int getPWMChip();
+    int getPWMChannel(int heaterChannel);
+
+    // PWM file descriptors
+    int pwmChip = -1;
+    bool pwmEnabled[2] = {false, false};
+    
+    // PID state
+    double pidIntegral[2] = {0, 0};
+    double pidLastError[2] = {0, 0};
+    std::atomic<bool> pidRunning[2];
+    std::thread pidThread[2];
+
+    // DS18B20 sensor paths
+    std::string ds18b20Path[2];
+    std::vector<std::string> availableDS18B20;
+
+    //========== Properties ==========
+    
+    // Ambient sensor (BME280)
+    INDI::PropertyNumber AmbientNP {4};
+    enum { AMB_TEMPERATURE, AMB_HUMIDITY, AMB_PRESSURE, AMB_DEWPOINT };
+    
+    // Manual humidity input (for BMP280 without humidity sensor)
+    INDI::PropertyNumber ManualHumidityNP {1};
+    
+    // Heater 1 properties
+    INDI::PropertyNumber Heater1TempNP {1};      // Current temperature from DS18B20
+    INDI::PropertyNumber Heater1PowerNP {1};     // Current PWM duty cycle (0-100%)
+    INDI::PropertyNumber Heater1SetpointNP {1};  // Target temperature or delta
+    INDI::PropertySwitch Heater1ModeSP {3};      // Off / Manual / Auto
+    enum { MODE_OFF, MODE_MANUAL, MODE_AUTO };
+    INDI::PropertyText Heater1SensorTP {1};      // Associated DS18B20 sensor ID
+    
+    // Heater 2 properties
+    INDI::PropertyNumber Heater2TempNP {1};
+    INDI::PropertyNumber Heater2PowerNP {1};
+    INDI::PropertyNumber Heater2SetpointNP {1};
+    INDI::PropertySwitch Heater2ModeSP {3};
+    INDI::PropertyText Heater2SensorTP {1};
+    
+    // Available sensors list
+    INDI::PropertyText AvailableSensorsTP {1};
+    
+    // PID parameters (shared)
+    INDI::PropertyNumber PIDNP {3};
+    enum { PID_KP, PID_KI, PID_KD };
+    
+    // Dew point delta (target = dewpoint + delta)
+    INDI::PropertyNumber DewDeltaNP {1};
+    
+    // Power monitoring (if INA219 available)
+    INDI::PropertyNumber PowerMonitorNP {4};
+    enum { PWR_VOLTAGE1, PWR_CURRENT1, PWR_VOLTAGE2, PWR_CURRENT2 };
+
+    // Constants
+    static constexpr int POLL_INTERVAL_MS = 5000;
+    static constexpr double DEFAULT_KP = 2.0;
+    static constexpr double DEFAULT_KI = 0.1;
+    static constexpr double DEFAULT_KD = 0.5;
+    static constexpr double DEFAULT_DEW_DELTA = 2.0;
+    static constexpr double TEMP_UNAVAILABLE = 100.0;
+    static constexpr double DEWPOINT_UNAVAILABLE = -100.0;
+};
+
+#endif // ASTRALIM_HEATER_H
+

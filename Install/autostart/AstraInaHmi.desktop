@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=AstraIna
+Exec=/opt/AstraDIY/AstraInaHmi.py
+

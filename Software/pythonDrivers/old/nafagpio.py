@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 # GPIO used PA17
 
 import gpiod

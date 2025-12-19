@@ -1,75 +1,77 @@
 /*******************************************************************************
-  Copyright(c) 2015-2021 Radek Kaczorek  <rkaczorek AT gmail DOT com>
+ * AstrAlim Relays Driver - Modern INDI API
+ * Copyright (c) 2024 AstrAlim Project
+ * Based on original work by Radek Kaczorek
+ ******************************************************************************/
 
- This library is free software; you can redistribute it and/or
- modify it under the terms of the GNU Library General Public
- License version 2 as published by the Free Software Foundation.
- .
- This library is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- Library General Public License for more details.
- .
- You should have received a copy of the GNU Library General Public License
- along with this library; see the file COPYING.LIB.  If not, write to
- the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- Boston, MA 02110-1301, USA.
-*******************************************************************************/
-
-#ifndef ASTROBERRYRELAYS_H
-#define ASTROBERRYRELAYS_H
-
-#include <string.h>
-#include <iostream>
-#include <stdio.h>
+#ifndef ASTRALIM_RELAYS_H
+#define ASTRALIM_RELAYS_H
 
 #include <defaultdevice.h>
+#include <memory>
+#include "astralim_gpio.h"
 
-class IndiAstrAlimRelays : public INDI::DefaultDevice
+class AstrAlimRelays : public INDI::DefaultDevice
 {
 public:
-	IndiAstrAlimRelays();
-	virtual ~IndiAstrAlimRelays();
-	virtual const char *getDefaultName();
-	virtual bool initProperties();
-	virtual bool updateProperties();
-	virtual void ISGetProperties(const char *dev);
-	virtual bool ISNewNumber (const char *dev, const char *name, double values[], char *names[], int n);
-	virtual bool ISNewSwitch (const char *dev, const char *name, ISState *states, char *names[], int n);
-	virtual bool ISNewText (const char *dev, const char *name, char *texts[], char *names[], int n);
-	virtual bool ISNewBLOB (const char *dev, const char *name, int sizes[], int blobsizes[], char *blobs[], char *formats[], char *names[], int n);
-	virtual bool ISSnoopDevice(XMLEle *root);
+    AstrAlimRelays();
+    virtual ~AstrAlimRelays() = default;
+
+    const char* getDefaultName() override;
+    
+    bool initProperties() override;
+    bool updateProperties() override;
+    
+    bool ISNewNumber(const char* dev, const char* name, double values[], char* names[], int n) override;
+    bool ISNewSwitch(const char* dev, const char* name, ISState* states, char* names[], int n) override;
+
 protected:
-	virtual bool saveConfigItems(FILE *fp);
-	virtual void TimerHit();
+    bool Connect() override;
+    bool Disconnect() override;
+    void TimerHit() override;
+    bool saveConfigItems(FILE* fp) override;
+
 private:
-	virtual bool Connect();
-	virtual bool Disconnect();
-	virtual void udateSwitches();
+    void updateSwitchStates();
+    bool setRelay(int relay, bool on);
+    void readINA219();
+    std::string execCommand(const char* cmd);
 
-	INumber BCMpinsN[3];
-	INumberVectorProperty BCMpinsNP;
-	ISwitch ActiveStateS[2];
-	ISwitchVectorProperty ActiveStateSP;
-	IText RelayLabelsT[8];
-	ITextVectorProperty RelayLabelsTP;
+    // GPIO controller
+    std::unique_ptr<AstrAlim::GpioController> gpio;
 
-	ISwitch Switch1S[2];
-	ISwitchVectorProperty Switch1SP;
-	ISwitch Switch2S[2];
-	ISwitchVectorProperty Switch2SP;
-	ISwitch Switch3S[2];
-	ISwitchVectorProperty Switch3SP;
+    // Properties - Active state
+    INDI::PropertySwitch ActiveStateSP {2};
+    enum { STATE_LOW, STATE_HIGH };
+    
+    // Properties - Relay switches
+    INDI::PropertySwitch Relay1SP {2};
+    INDI::PropertySwitch Relay2SP {2};
+    INDI::PropertySwitch Relay3SP {2};
+    enum { RELAY_ON, RELAY_OFF };
+    
+    // Properties - BCM Pins (configurable)
+    INDI::PropertyNumber BCMPinsNP {3};
+    
+    // Properties - Power monitoring (INA219)
+    INDI::PropertyNumber PowerDC1NP {3};  // Voltage, Current, Power
+    INDI::PropertyNumber PowerDC2NP {3};
+    INDI::PropertyNumber PowerDC3NP {3};
+    INDI::PropertyNumber TotalPowerNP {2};  // Total current, Total energy
+    enum { PWR_VOLTAGE, PWR_CURRENT, PWR_POWER };
 
-	int activeState = 0;
-	int relayState[3]; // relayState is mission critical to maintain relays status between reconnections. initially set to !activeState
-	int pollingTime = 1000;
-
-	const char* gpio_chip_path = "/dev/gpiochip4";
-	struct gpiod_chip *chip;
-	struct gpiod_line *gpio_relay1;
-	struct gpiod_line *gpio_relay2;
-	struct gpiod_line *gpio_relay3;
+    // State
+    int activeState = 0;  // 0 = active low, 1 = active high
+    int relayState[3] = {0, 0, 0};
+    double totalEnergymWh = 0;
+    
+    static constexpr int POLLING_MS = 1000;
+    
+    // INA219 I2C addresses
+    static constexpr int INA_DC1_ADDR = 0x41;
+    static constexpr int INA_DC2_ADDR = 0x44;
+    static constexpr int INA_DC3_ADDR = 0x46;
 };
 
-#endif
+#endif // ASTRALIM_RELAYS_H
+

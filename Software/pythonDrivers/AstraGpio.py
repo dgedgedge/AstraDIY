@@ -1,4 +1,4 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 # GPIO used PA17
 
 import gpiod
@@ -30,7 +30,20 @@ class AstraGpio():
         if self.gpioline == None:
             raise Exception("Gpio Not Found")
         #self.gpioline.request(consumer='AstrAlim', type=gpiod.LINE_REQ_DIR_OUT, default_vals=[0])
-        self.gpioline.request(consumer='AstrAlim')
+        try:
+            self.gpioline.request(consumer='AstrAlim')
+        except OSError as e:
+            if e.errno == 16:  # Device or resource busy
+                # Vérifier qui utilise la GPIO
+                consumer = self.gpioline.consumer()
+                if consumer:
+                    raise Exception(f"GPIO {self.gpioline.name()} est déjà utilisée par '{consumer}'. "
+                                  f"Fermez l'autre instance du programme ou redémarrez le système.")
+                else:
+                    raise Exception(f"GPIO {self.gpioline.name()} est déjà utilisée. "
+                                  f"Fermez l'autre instance du programme ou redémarrez le système.")
+            else:
+                raise
         if self.gpioline.direction() != self.gpioline.DIRECTION_OUTPUT:
             print("Set dirout at init")
             self.gpioline.set_direction_output()

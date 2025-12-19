@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=AstraPwm
+Exec=/opt/AstraDIY/AstraPwmHmi.py
+

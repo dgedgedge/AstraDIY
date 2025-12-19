@@ -1,6 +1,6 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 # GPIO used PA17
-from syspwm import SysPWM
+from lib.syspwm import SysPWM
 import threading
 import glob
 import os
@@ -11,7 +11,7 @@ import numpy as np
 import json
 
 
-from bme280_lib import readBME280All
+from lib.bme280_lib import readBME280All
 import math
 
 
@@ -31,6 +31,7 @@ class AstraTempFetcher(threading.Thread):
         self.bme_pressure=0
         self.bme_humidity=0
         self.bme_tempRosee=self.TEMPUNAVAIL
+        self.manual_humidity=None  # Humidité saisie manuellement (pour BMP280)
 
 
     @classmethod
@@ -99,13 +100,27 @@ class AstraTempFetcher(threading.Thread):
                     self.tableTemp[name]["val"] = self.TEMPUNAVAIL
             try:
                 self.bme_temperature,self.bme_pressure,self.bme_humidity = readBME280All()
+                self.bme_present = True
+                
+                # Calcul du point de rosée (nécessite humidité > 0)
                 # ref : https://fr.planetcalc.com/248/
                 # ref : https://fr.wikipedia.org/wiki/Point_de_ros%C3%A9e
-                a=17.27
-                b=237.7
-                facteur=((a*self.bme_temperature) / (b+self.bme_temperature)) + math.log(self.bme_humidity/100)
-                self.bme_tempRosee = b*(facteur)/(a-(facteur))
-                self.bme_present = True
+                
+                # Déterminer quelle humidité utiliser
+                humidity_to_use = self.bme_humidity
+                if self.bme_humidity == 0 and self.manual_humidity is not None:
+                    # BMP280 avec humidité manuelle
+                    humidity_to_use = self.manual_humidity
+                
+                if humidity_to_use > 0:
+                    a=17.27
+                    b=237.7
+                    facteur=((a*self.bme_temperature) / (b+self.bme_temperature)) + math.log(humidity_to_use/100)
+                    self.bme_tempRosee = b*(facteur)/(a-(facteur))
+                else:
+                    # Pas d'humidité disponible
+                    self.bme_tempRosee = self.ROSEEUNAVAIL
+                    
             except Exception as e:
                 # print(e)
                 self.bme_present=False
@@ -125,9 +140,13 @@ class AstraTempFetcher(threading.Thread):
     def get_default_temp(self):
         with self.lock:
             tempNames = list(self.tableTemp.keys())
+            print(f"[DEBUG AstraTempFetcher.get_default_temp] tempNames disponibles = {tempNames}")
             if len(tempNames) > 0:
-                return self.tableTemp[tempNames[0]]["val"]
+                result = tempNames[0]  # Retourne le nom du capteur, pas sa valeur
+                print(f"[DEBUG AstraTempFetcher.get_default_temp] retourne '{result}'")
+                return result
             else:
+                print(f"[DEBUG AstraTempFetcher.get_default_temp] aucun capteur disponible, retourne None")
                 return None
 
     def get_bmeTemp(self):
@@ -137,10 +156,32 @@ class AstraTempFetcher(threading.Thread):
         return self.bme_pressure
 
     def get_bmeHumidity(self):
+        # Si humidité manuelle définie et capteur ne fournit pas d'humidité, utiliser la valeur manuelle
+        if self.bme_humidity == 0 and self.manual_humidity is not None:
+            return self.manual_humidity
         return self.bme_humidity
+    
+    def has_humidity_sensor(self):
+        """Retourne True si le capteur a un capteur d'humidité (BME280), False sinon (BMP280)"""
+        return self.bme_humidity > 0
 
     def get_bmeTempRosee(self):
         return self.bme_tempRosee
+    
+    def set_manual_humidity(self, humidity):
+        """Définit manuellement l'humidité (pour BMP280 sans capteur d'humidité)"""
+        with self.lock:
+            self.manual_humidity = humidity
+            # Recalculer le point de rosée si on a la température
+            if self.bme_temperature != self.TEMPUNAVAIL and humidity > 0:
+                try:
+                    import math
+                    a = 17.27
+                    b = 237.7
+                    alpha = ((a * self.bme_temperature) / (b + self.bme_temperature)) + math.log(humidity / 100.0)
+                    self.bme_tempRosee = (b * alpha) / (a - alpha)
+                except:
+                    self.bme_tempRosee = self.ROSEEUNAVAIL
 
     def isPresent_bme(self):
         return self.bme_present
@@ -209,10 +250,11 @@ class AstraPwm():
         # Temp fetcher
         self.AstraTempFetcher = AstraTempFetcher.get_instance()
         self.tempname= self.AstraTempFetcher.get_default_temp()
+        print(f"[DEBUG AstraPwm.__init__] {self.name}: tempname initialisé avec get_default_temp() = '{self.tempname}'")
 
         # Temp Rosee setup
         self.deltaTempRosee=+2
-        self.asservTempRosee = True
+        self.asservTempRosee = False  # Désactivé par défaut
 
         # Aserv
         self.thread=None
@@ -221,13 +263,14 @@ class AstraPwm():
         self.Ki = 0.0
         self.Kd = 0.0
 
-        self.cmdTemp=0
+        self.cmdTemp=10  # Consigne par défaut 10°C
         self.poids_objet = 1
         self.puissance_max = 12*3
         self.minTemp = MinTemp
         self.maxTemp = MaxTemp
         self._running = False
-        self.load()
+        load_result = self.load()
+        print(f"[DEBUG AstraPwm.__init__] {self.name}: après load(), tempname='{self.tempname}', load_result={load_result}")
 
     def end(self):
         self.stopAserv()
@@ -262,7 +305,12 @@ class AstraPwm():
 
     def updateCmdTempfromTempRosee(self):
         if self.asservTempRosee: 
-            self.cmdTemp = self.get_bmeTempRosee() + self.deltaTempRosee
+            tempRosee = self.get_bmeTempRosee()
+            # Vérifier si le point de rosée est disponible
+            if tempRosee != self.ROSEEUNAVAIL:
+                self.cmdTemp = tempRosee + self.deltaTempRosee
+            # Si le point de rosée n'est pas disponible, garder la consigne actuelle
+            # (ne pas la modifier pour éviter d'afficher -98°C)
 
     # Asserv Parameters
     def get_autoUpdateKpKiKd(self):
@@ -278,19 +326,19 @@ class AstraPwm():
         return self.Kp
 
     def set_kp(self, Kp):
-        self.Kp=max(0, min(self.Kp, 100))
+        self.Kp=max(0, min(Kp, 100))
 
     def get_Ki(self):
         return self.Ki
 
     def set_Ki(self, Ki):
-        self.Ki=max(0, min(self.Ki, 100))
+        self.Ki=max(0, min(Ki, 100))
 
     def get_Kd(self):
         return self.Kd
 
     def set_Kd(self, Kd):
-        self.Kd=max(0, min(self.Kd, 100))
+        self.Kd=max(0, min(Kd, 100))
 
     # Associated sensor
     def get_listTemp(self):
@@ -300,6 +348,12 @@ class AstraPwm():
         return self.AstraTempFetcher.get_temp(self.tempname)
 
     def get_associateTemp(self):
+        # Si tempname est None, on essaie de récupérer un capteur par défaut
+        if self.tempname is None:
+            default_temp = self.AstraTempFetcher.get_default_temp()
+            if default_temp is not None:
+                print(f"[DEBUG AstraPwm.get_associateTemp] {self.name}: tempname était None, mise à jour avec '{default_temp}'")
+                self.tempname = default_temp
         return self.tempname
 
     def _set_associateTemp(self, name):
@@ -333,6 +387,14 @@ class AstraPwm():
 
     def get_bmeTempRosee(self):
         return self.AstraTempFetcher.get_bmeTempRosee()
+    
+    def has_humidity_sensor(self):
+        """Retourne True si le capteur a un capteur d'humidité (BME280), False sinon (BMP280)"""
+        return self.AstraTempFetcher.has_humidity_sensor()
+    
+    def set_manual_humidity(self, humidity):
+        """Définit manuellement l'humidité (pour BMP280 sans capteur d'humidité)"""
+        self.AstraTempFetcher.set_manual_humidity(humidity)
 
     def print_status(self):
         try:
@@ -415,18 +477,73 @@ class AstraPwm():
         variables_dict = {}
         filename = "sauve"+self.name+".json"
         chemin_complet=Path.home() / ".AstrAlim"  / filename
+        print(f"[DEBUG AstraPwm.load] {self.name}: fichier de sauvegarde = {chemin_complet}, existe = {chemin_complet.exists()}")
         if chemin_complet.exists():
             with open(chemin_complet, "r") as f:
                 variables_dict = json.load(f)
+            print(f"[DEBUG AstraPwm.load] {self.name}: contenu du fichier = {variables_dict}")
             if "Kp" in variables_dict and "Ki"  in variables_dict  and "Kd"  in variables_dict:
                 self.Kp = variables_dict["Kp"]
                 self.Ki = variables_dict["Ki"]
                 self.Kd = variables_dict["Kd"]
             if "tempname" in variables_dict:
-                return self._set_associateTemp(variables_dict["tempname"])
+                saved_tempname = variables_dict["tempname"]
+                print(f"[DEBUG AstraPwm.load] {self.name}: tempname trouvé dans sauvegarde = '{saved_tempname}', tempname actuel = '{self.tempname}'")
+                result = self._set_associateTemp(saved_tempname)
+                print(f"[DEBUG AstraPwm.load] {self.name}: après _set_associateTemp(), tempname = '{self.tempname}', result = {result}")
+                return result
             else:
+                print(f"[DEBUG AstraPwm.load] {self.name}: pas de tempname dans sauvegarde, tempname reste = '{self.tempname}'")
                 return False
         else:
+            print(f"[DEBUG AstraPwm.load] {self.name}: fichier de sauvegarde n'existe pas")
+            # Autoconfiguration : si aucun fichier de config n'existe pour les deux instances,
+            # on assigne automatiquement les capteurs disponibles
+            chemin_pwm1 = Path.home() / ".AstrAlim" / "sauveAstraPwm1.json"
+            chemin_pwm2 = Path.home() / ".AstrAlim" / "sauveAstraPwm2.json"
+            
+            # Vérifier si c'est une première installation (aucun des deux fichiers n'existe)
+            if not chemin_pwm1.exists() and not chemin_pwm2.exists():
+                print(f"[DEBUG AstraPwm.load] {self.name}: Première installation détectée - autoconfiguration des capteurs")
+                available_sensors = self.AstraTempFetcher.get_listTemp()
+                print(f"[DEBUG AstraPwm.load] {self.name}: Capteurs disponibles = {available_sensors}")
+                
+                if len(available_sensors) >= 2:
+                    # Assigner automatiquement : premier capteur à AstraPwm1, second à AstraPwm2
+                    if self.name == "AstraPwm1":
+                        assigned_sensor = available_sensors[0]
+                        print(f"[DEBUG AstraPwm.load] {self.name}: Autoconfiguration avec '{assigned_sensor}' (premier capteur)")
+                        self.tempname = assigned_sensor
+                        self.save()  # Sauvegarder immédiatement
+                        return True
+                    elif self.name == "AstraPwm2":
+                        assigned_sensor = available_sensors[1]
+                        print(f"[DEBUG AstraPwm.load] {self.name}: Autoconfiguration avec '{assigned_sensor}' (second capteur)")
+                        self.tempname = assigned_sensor
+                        self.save()  # Sauvegarder immédiatement
+                        return True
+                elif len(available_sensors) == 1:
+                    # Un seul capteur : assigner au premier (AstraPwm1)
+                    if self.name == "AstraPwm1":
+                        assigned_sensor = available_sensors[0]
+                        print(f"[DEBUG AstraPwm.load] {self.name}: Autoconfiguration avec '{assigned_sensor}' (un seul capteur disponible)")
+                        self.tempname = assigned_sensor
+                        self.save()
+                        return True
+                    else:
+                        print(f"[DEBUG AstraPwm.load] {self.name}: Un seul capteur disponible, non assigné à AstraPwm2")
+                else:
+                    print(f"[DEBUG AstraPwm.load] {self.name}: Aucun capteur disponible pour l'autoconfiguration")
+            
+            # Si tempname est None et qu'il n'y a pas de fichier de sauvegarde, 
+            # on essaie de récupérer un capteur par défaut maintenant
+            if self.tempname is None:
+                default_temp = self.AstraTempFetcher.get_default_temp()
+                if default_temp is not None:
+                    print(f"[DEBUG AstraPwm.load] {self.name}: tempname était None, mise à jour avec get_default_temp() = '{default_temp}'")
+                    self.tempname = default_temp
+                else:
+                    print(f"[DEBUG AstraPwm.load] {self.name}: tempname est None et aucun capteur disponible")
             return False
 
     def save(self):

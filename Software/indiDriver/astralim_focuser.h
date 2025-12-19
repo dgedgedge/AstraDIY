@@ -1,108 +1,121 @@
 /*******************************************************************************
-  Copyright(c) 2014-2021 Radek Kaczorek  <rkaczorek AT gmail DOT com>
+ * AstrAlim Focuser Driver - Modern INDI API
+ * Copyright (c) 2024 AstrAlim Project
+ * Based on original work by Radek Kaczorek and D.Germa
+ ******************************************************************************/
 
- This library is free software; you can redistribute it and/or
- modify it under the terms of the GNU Library General Public
- License version 2 as published by the Free Software Foundation.
- .
- This library is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- Library General Public License for more details.
- .
- You should have received a copy of the GNU Library General Public License
- along with this library; see the file COPYING.LIB.  If not, write to
- the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- Boston, MA 02110-1301, USA.
-*******************************************************************************/
-
-#ifndef FOCUSRPI_H
-#define FOCUSRPI_H
+#ifndef ASTRALIM_FOCUSER_H
+#define ASTRALIM_FOCUSER_H
 
 #include <indifocuser.h>
+#include <memory>
+#include "astralim_gpio.h"
 
 class AstrAlimFocuser : public INDI::Focuser
 {
 public:
-	AstrAlimFocuser();
-	virtual ~AstrAlimFocuser();
-	const char *getDefaultName();
-	virtual bool initProperties();
-	virtual bool updateProperties();
-	virtual void ISGetProperties (const char *dev);
-	virtual bool ISNewNumber (const char *dev, const char *name, double values[], char *names[], int n);
-	virtual bool ISNewSwitch (const char *dev, const char *name, ISState *states, char *names[], int n);
-	virtual bool ISNewText (const char *dev, const char *name, char *texts[], char *names[], int n);
-	virtual bool ISSnoopDevice(XMLEle *root);
-	static void stepperStandbyHelper(void *context);
-	static void updateTemperatureHelper(void *context);
-	static void temperatureCompensationHelper(void *context);
+    AstrAlimFocuser();
+    virtual ~AstrAlimFocuser() = default;
+
+    const char* getDefaultName() override;
+    
+    bool initProperties() override;
+    bool updateProperties() override;
+    
+    bool ISNewNumber(const char* dev, const char* name, double values[], char* names[], int n) override;
+    bool ISNewSwitch(const char* dev, const char* name, ISState* states, char* names[], int n) override;
+    bool ISNewText(const char* dev, const char* name, char* texts[], char* names[], int n) override;
+    bool ISSnoopDevice(XMLEle* root) override;
+
 protected:
-	virtual IPState MoveAbsFocuser(uint32_t ticks) override;
-	virtual IPState MoveRelFocuser(FocusDirection dir, uint32_t ticks) override;
-	virtual bool ReverseFocuser(bool enabled) override;
-	virtual bool SyncFocuser(uint32_t ticks) override;
-	virtual bool SetFocuserBacklash(int32_t steps) override;
-	virtual bool AbortFocuser() override;
-	virtual void TimerHit() override;
-	virtual bool saveConfigItems(FILE *fp) override;
+    bool Connect() override;
+    bool Disconnect() override;
+    
+    IPState MoveAbsFocuser(uint32_t targetTicks) override;
+    IPState MoveRelFocuser(FocusDirection dir, uint32_t ticks) override;
+    bool ReverseFocuser(bool enabled) override;
+    bool SyncFocuser(uint32_t ticks) override;
+    bool SetFocuserBacklash(int32_t steps) override;
+    bool AbortFocuser() override;
+    void TimerHit() override;
+    bool saveConfigItems(FILE* fp) override;
+
 private:
-	virtual bool Connect();
-	virtual bool Disconnect();
+    // Motor control
+    void stepMotor();
+    void setResolution(int res);
+    void wakeUpMotor();
+    void sleepMotor();
+    
+    // Position persistence
+    int savePosition(int pos);
+    int loadPosition();
+    
+    // Temperature
+    bool readDS18B20();
+    void updateTemperature();
+    void temperatureCompensation();
+    
+    // Info calculation
+    void updateFocuserInfo();
+    
+    // Timer callbacks
+    static void stepperStandbyHelper(void* context);
+    static void updateTemperatureHelper(void* context);
+    static void temperatureCompensationHelper(void* context);
+    void stepperStandby();
 
-	virtual void stepMotor();
-	virtual void setResolution(int res);
-	virtual int savePosition(int pos);
-	virtual bool readDS18B20();
-	void getFocuserInfo();
-	int stepperStandbyID { -1 };
-	void stepperStandby();
-	int updateTemperatureID { -1 };
-	void updateTemperature();
-	int temperatureCompensationID { -1 };
-	void temperatureCompensation();
+    // GPIO controller
+    std::unique_ptr<AstrAlim::GpioController> gpio;
 
-	ISwitch FocusResolutionS[6];
-	ISwitchVectorProperty FocusResolutionSP;
-	ISwitch MotorBoardS[2];
-	ISwitchVectorProperty MotorBoardSP;
-	ISwitch TemperatureCompensateS[2];
-	ISwitchVectorProperty TemperatureCompensateSP;
-	ISwitch StepperStandbyS[2];
-	ISwitchVectorProperty StepperStandbySP;
-	INumber FocuserInfoN[3];
-	INumberVectorProperty FocuserInfoNP;
-	INumber BCMpinsN[6];
-	INumberVectorProperty BCMpinsNP;
-	INumber StepperStandbyTimeN[1];
-	INumberVectorProperty StepperStandbyTimeNP;	
-	INumber FocusStepDelayN[1];
-	INumberVectorProperty FocusStepDelayNP;
-	INumber FocuserTravelN[1];
-	INumberVectorProperty FocuserTravelNP;
-	INumber ScopeParametersN[2];
-	INumberVectorProperty ScopeParametersNP;
-	INumber FocusTemperatureN[1];
-	INumberVectorProperty FocusTemperatureNP;
-	INumber TemperatureCoefN[1];
-	INumberVectorProperty TemperatureCoefNP;
-	IText ActiveTelescopeT[1];
-	ITextVectorProperty ActiveTelescopeTP;
+    // Properties - Resolution
+    INDI::PropertySwitch FocusResolutionSP {6};
+    enum { RES_1, RES_2, RES_4, RES_8, RES_16, RES_32 };
+    
+    // Properties - Motor Board
+    INDI::PropertySwitch MotorBoardSP {2};
+    enum { BOARD_DRV8834, BOARD_A4988 };
+    
+    // Properties - Temperature Compensation
+    INDI::PropertySwitch TemperatureCompensateSP {2};
+    enum { TC_ENABLED, TC_DISABLED };
+    
+    // Properties - Stepper Standby
+    INDI::PropertySwitch StepperStandbySP {2};
+    enum { STANDBY_ENABLED, STANDBY_DISABLED };
+    
+    // Properties - Numbers
+    INDI::PropertyNumber FocuserInfoNP {3};
+    INDI::PropertyNumber StepperStandbyTimeNP {1};
+    INDI::PropertyNumber FocusStepDelayNP {1};
+    INDI::PropertyNumber FocuserTravelNP {1};
+    INDI::PropertyNumber FocusTemperatureNP {1};
+    INDI::PropertyNumber TemperatureCoefNP {1};
+    INDI::PropertyNumber ScopeParametersNP {2};
+    
+    // Properties - Text
+    INDI::PropertyText ActiveTelescopeTP {1};
 
-	struct gpiod_chip *chip;
-	struct gpiod_line *gpio_dir;
-	struct gpiod_line *gpio_step;
-	struct gpiod_line *gpio_sleep;
-	struct gpiod_line *gpio_m1;
-	struct gpiod_line *gpio_m2;
-	struct gpiod_line *gpio_m3;
-
-	int backlashTicksRemaining;
-	int focuserTicksRemaining;
-	int stepperDirection = 1;
-	
-	int resolution = 1;
-	float lastTemperature;
+    // State variables
+    int resolution = 1;
+    int stepperDirection = 1;
+    int backlashTicksRemaining = 0;
+    int focuserTicksRemaining = 0;
+    float lastTemperature = 0;
+    bool motorAwake = false;
+    
+    // Timer IDs
+    int stepperStandbyID = -1;
+    int updateTemperatureID = -1;
+    int temperatureCompensationID = -1;
+    
+    // Constants
+    static constexpr int MAX_RESOLUTION = 32;
+    static constexpr int MINMAX_MIN_POS = 0;
+    static constexpr int MINMAX_MAX_POS = 100000;
+    static constexpr int TEMPERATURE_UPDATE_TIMEOUT = 60000;
+    static constexpr int TEMPERATURE_COMPENSATION_TIMEOUT = 60000;
 };
 
-#endif
+#endif // ASTRALIM_FOCUSER_H
+
