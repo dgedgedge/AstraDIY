@@ -23,12 +23,28 @@ elif [ -d "$DESKTOP_DIR_ALT" ]; then
     TARGET_DESKTOP="$DESKTOP_DIR_ALT"
 fi
 
+# Installation de l'icône système
+echo "Installation de l'icône système..."
+LOGO_SOURCE="${FILESOURCE}/../Software/pythonDrivers/logo/logo-astralim-black-96x96.png"
+ICON_DIR="${REAL_HOME}/.local/share/icons/hicolor/96x96/apps"
+if [ -f "$LOGO_SOURCE" ]; then
+    mkdir -p "$ICON_DIR"
+    cp "$LOGO_SOURCE" "$ICON_DIR/astralim.png"
+    echo "  ✓ Icône installée dans $ICON_DIR/astralim.png"
+    # Mettre à jour le cache des icônes
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+        gtk-update-icon-cache -f -t "${REAL_HOME}/.local/share/icons/hicolor" 2>/dev/null || true
+    fi
+else
+    echo "  ⚠ Logo source non trouvé: $LOGO_SOURCE"
+fi
+
 # Installation des fichiers .desktop pour les HMI et les drivers INDI
 if [ -n "$TARGET_DESKTOP" ]; then
     echo "Installation des raccourcis sur le bureau..."
     
-    # Chemin vers le logo (installé dans /opt/AstraDIY/logo/)
-    LOGO_PATH="/opt/AstraDIY/logo/logo-astralim-black.jpg"
+    # Utiliser le nom de l'icône système (sans extension)
+    ICON_NAME="astralim"
     
     # Fichier .desktop pour AstraDIY HMI
     cat > "$TARGET_DESKTOP/AstraDIY.desktop" << EOF
@@ -37,7 +53,7 @@ Type=Application
 Name=AstraDIY
 Comment=Panneau de contrôle AstraDIY (Bandes chauffantes, Alimentations, GPS)
 Exec=/opt/AstraDIY/AstraDIYHmi.py
-Icon=${LOGO_PATH}
+Icon=${ICON_NAME}
 Terminal=false
 Categories=System;Settings;
 StartupNotify=true
@@ -53,7 +69,7 @@ Type=Application
 Name=AstraGPS
 Comment=Interface GPS et Horloge AstraDIY
 Exec=/opt/AstraDIY/AstraGpsHmi.py
-Icon=${LOGO_PATH}
+Icon=${ICON_NAME}
 Terminal=false
 Categories=System;Settings;
 StartupNotify=true
@@ -75,7 +91,7 @@ Type=Application
 Name=Mise à Jour Astralim
 Comment=Met à jour le dépôt Git et relance l'installation AstraDIY
 Exec=bash "${UPDATE_SCRIPT_ABS}"
-Icon=${LOGO_PATH}
+Icon=${ICON_NAME}
 Terminal=true
 Categories=System;Settings;
 StartupNotify=true
@@ -100,7 +116,7 @@ Type=Application
 Name=Installer Drivers INDI AstrAlim
 Comment=Compile et installe les drivers INDI pour AstrAlim
 Exec=bash -c "cd \"${INDI_DRIVER_DIR_ABS}\" && sudo ./install_indi_astralim.sh"
-Icon=${LOGO_PATH}
+Icon=${ICON_NAME}
 Terminal=true
 Categories=System;Settings;
 StartupNotify=true

@@ -8,6 +8,8 @@ from AstraGpsHmi import MainGpsWindow
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QTabWidget, QVBoxLayout, QLabel
 
+QApplication.setApplicationName("AstraDIY")
+QApplication.setDesktopFileName("AstraDIY.desktop")
 
 # Main window class
 class MainWindow(QMainWindow):
