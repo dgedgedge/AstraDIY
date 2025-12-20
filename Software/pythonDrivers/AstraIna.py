@@ -343,7 +343,13 @@ if __name__ == "__main__":
         while True:
             time.sleep(1)
             ina219:AstraIna=listIna[0]
-            print("Energie=",ina219.getTotalEnergiemWS()/3600," mAh")
+            # Conversion correcte: mWs -> mWh -> mAh
+            # mWs / 3600 = mWh, puis mWh / tension_V = mAh
+            # Pour l'exemple, on utilise 12V comme tension de référence
+            tension_ref_V = 12.0
+            total_mWh = ina219.getTotalEnergiemWS() / 3600.0
+            total_mAh = total_mWh / tension_ref_V
+            print(f"Energie={total_mAh:.3f} mAh (sous {tension_ref_V}V, {total_mWh:.3f} mWh)")
             print("===============================================================")
             for ina219 in listIna:
                 name=ina219.getName()
@@ -382,12 +388,13 @@ if __name__ == "__main__":
                 ina219 = info["ina219_object"]
                 shunt_voltage = ina219.shunt_voltage()
                 bus_voltage = ina219.voltage()
-                current = ina219.current()
+                current = ina219.current()  # Retourne des milliamps
                 power = ina219.power()
-                energie = ina219.energie() / 60 / 60
-                intPeriod=ina219.intPeriod()
+                # Note: energie() et intPeriod() n'existent pas dans INA219, seulement dans AstraIna
+                # Conversion correcte: current est en milliamps, donc pour afficher en A, diviser par 1000
+                currentA = current / 1000.0
 
-                print(f"{name}: Shunt {shunt_voltage:+.3f}V, Bus {bus_voltage:+.3f}V Current: {current:+.3f}A, Power: {power:.3f}mW Energie: {energie:.3f}mWh intPeriod: {intPeriod:.3f}s")
+                print(f"{name}: Shunt {shunt_voltage:+.3f}mV, Bus {bus_voltage:+.3f}V Current: {currentA:+.3f}A, Power: {power:.3f}mW")
 
 
 
