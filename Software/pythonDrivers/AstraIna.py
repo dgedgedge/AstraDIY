@@ -321,7 +321,58 @@ class AstraIna:
         """
         Return the sum of INA energie measurements in mWs.
         """
-        return self.AstraInaFetcher.getTotalEnergiemWS()    
+        return self.AstraInaFetcher.getTotalEnergiemWS()
+    
+    def getDiagnosticInfo(self)->dict:
+        """
+        Retourne des informations de diagnostic pour déboguer les mesures.
+        Utile pour identifier les problèmes de mesure de courant.
+        """
+        try:
+            if self.ina219 is None:
+                return {"error": "INA219 not initialized"}
+            
+            # Vérifier si le capteur répond
+            ping_ok = self.ina219.ping()
+            
+            if not ping_ok:
+                return {"error": "INA219 not responding", "ping": False}
+            
+            # Lire les valeurs brutes
+            try:
+                shunt_voltage_mv = self.ina219.shunt_voltage()  # en millivolts
+                bus_voltage_v = self.ina219.voltage()  # en volts
+                current_ma = self.ina219.current()  # en milliamps
+                power_mw = self.ina219.power()  # en milliwatts
+                current_overflow = self.ina219.current_overflow()
+                
+                # Calculer le courant théorique à partir de la tension shunt
+                # I = V_shunt / R_shunt
+                if hasattr(self, 'caract'):
+                    shunt_ohms = self.caract.get("shunt_ohms", 0.01)
+                else:
+                    shunt_ohms = 0.01  # valeur par défaut
+                
+                current_theoretical_ma = (shunt_voltage_mv / 1000.0) / shunt_ohms * 1000.0  # en mA
+                
+                return {
+                    "ping": ping_ok,
+                    "shunt_voltage_mv": shunt_voltage_mv,
+                    "bus_voltage_v": bus_voltage_v,
+                    "current_ma": current_ma,
+                    "current_theoretical_ma": current_theoretical_ma,
+                    "power_mw": power_mw,
+                    "current_overflow": current_overflow,
+                    "shunt_ohms": shunt_ohms,
+                    "voltage_range": self.voltage_range if hasattr(self, 'voltage_range') else None,
+                    "gain": self.gain if hasattr(self, 'gain') else None,
+                    "configured": self.configured,
+                    "configuration_sent": self.configurationSend
+                }
+            except Exception as e:
+                return {"error": str(e), "ping": ping_ok}
+        except Exception as e:
+            return {"error": str(e)}    
     
 if __name__ == "__main__":
     import signal
