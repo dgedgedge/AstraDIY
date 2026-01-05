@@ -9,8 +9,20 @@ Modified to comply to PI5.
 import logging
 import time
 from math import trunc
+import threading
 #import Adafruit_GPIO.I2C as I2C
 import smbus
+
+# Verrou global pour synchroniser tous les accès I2C sur le même bus
+_i2c_locks = {}
+_i2c_locks_lock = threading.Lock()
+
+def _get_i2c_lock(busnum):
+    """Retourne un verrou unique pour chaque bus I2C"""
+    with _i2c_locks_lock:
+        if busnum not in _i2c_locks:
+            _i2c_locks[busnum] = threading.Lock()
+        return _i2c_locks[busnum]
 
 class I2C:
     def __init__(self, address, busnum):
@@ -18,21 +30,26 @@ class I2C:
         self.address=address
         self.bus=smbus.SMBus(self.busnum)
         self.retry=4
+        self.i2c_lock = _get_i2c_lock(busnum)  # Verrou partagé pour ce bus I2C
 
     def ping(self):
         returnval=False
-        try:
-         self.bus.read_byte(self.address)
-         returnval=True
-        except:
-          pass
+        with self.i2c_lock:  # Synchroniser l'accès I2C
+            try:
+                self.bus.read_byte(self.address)
+                returnval=True
+            except:
+                pass
+            time.sleep(0.001)  # Petit délai après chaque accès I2C
         return returnval
           
         
     def writeList(self, register, register_bytes):
         """Write bytes to the specified register."""
         #print(f"Wrote to 0x%02X register 0x%02X: %s" % (self.address, register, register_bytes))
-        self.bus.write_i2c_block_data(self.address, register, register_bytes)
+        with self.i2c_lock:  # Synchroniser l'accès I2C
+            self.bus.write_i2c_block_data(self.address, register, register_bytes)
+            time.sleep(0.001)  # Petit délai après chaque accès I2C
 
     def readU16(self, register, little_endian=True):
         """Read an unsigned 16-bit value from the specified register, with the
@@ -44,10 +61,12 @@ class I2C:
             ex=0
             retry=retry-1
             try:
-                result = self.bus.read_word_data(self.address, register) & 0xFFFF
+                with self.i2c_lock:  # Synchroniser l'accès I2C
+                    result = self.bus.read_word_data(self.address, register) & 0xFFFF
+                    time.sleep(0.001)  # Petit délai après chaque accès I2C
                 retry=0
             except Exception as ex:
-                time.sleep(0.001)
+                time.sleep(0.002)  # Délai plus long en cas d'erreur
                 if not(retry > 0):
                     raise ex
         #print("Read 0x%04X from register pair 0x%02X, 0x%02X" % (result, register, register+1))

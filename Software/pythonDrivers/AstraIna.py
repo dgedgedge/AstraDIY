@@ -46,18 +46,20 @@ class AstraInaFetcher(threading.Thread):
                     for ina in self.listIna:
                         try:
                             ina.sendConfiguration()
+                            time.sleep(0.005)  # Délai entre chaque configuration I2C pour éviter les conflits
                         except Exception as e:
                             # Logger les erreurs pour les PWM
                             if "Pwm" in ina.getName():
                                 print(f"[DEBUG AstraInaFetcher.run] ERREUR sendConfiguration pour {ina.getName()}: {e}")
                             pass
                     
-                    time.sleep(0.1)
+                    time.sleep(0.1)  # Délai entre configuration et lecture
 
                     for ina in self.listIna:
                         try:
                             ina.getDataFromIna()
                             totalEnergiemWS+=ina.energiemWS()
+                            time.sleep(0.005)  # Délai entre chaque lecture I2C pour éviter les conflits
                         except Exception as e:
                             # Logger les erreurs pour les PWM
                             if "Pwm" in ina.getName():
