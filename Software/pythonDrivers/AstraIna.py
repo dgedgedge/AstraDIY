@@ -268,6 +268,13 @@ class AstraIna:
                 raw_current_mA = float(self.ina219.current())
                 raw_power_mW = float(self.ina219.power())
                 
+                # Inverser la polarité pour AstraPwm1 (le shunt est monté dans le sens inverse)
+                if self.name == "AstraPwm1":
+                    raw_shunt_mV = -raw_shunt_mV
+                    raw_current_mA = -raw_current_mA
+                    # Recalculer la puissance avec les valeurs inversées (P = V * I)
+                    raw_power_mW = raw_voltage_V * raw_current_mA
+                
                 self._shuntVoltagemV = max(raw_shunt_mV, 0.0)
                 self._voltageV = max(raw_voltage_V, 0.0)
                 self._currentmA = max(raw_current_mA, 0.0)
