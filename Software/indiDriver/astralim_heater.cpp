@@ -15,8 +15,10 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <array>
+#include <vector>
 #include <algorithm>
 #include <chrono>
+#include <glob.h>
 
 // Singleton instance
 static std::unique_ptr<AstrAlimHeater> heaterInstance(new AstrAlimHeater());
@@ -351,12 +353,68 @@ void AstrAlimHeater::TimerHit()
 
 int AstrAlimHeater::getPWMChip()
 {
-    // Detect Pi model and return appropriate PWM chip
-    std::string model = execCommand("cat /sys/firmware/devicetree/base/model 2>/dev/null");
-    if (model.find("Pi 5") != std::string::npos)
-        return 2;  // Pi 5 uses pwmchip2
-    else
-        return 0;  // Pi 4 and earlier use pwmchip0
+    // Dynamic detection: find first pwmchip with at least 2 channels
+    // This works with kernel 6.6 (pwmchip2) and kernel 6.12+ (pwmchip0/1/2 variable)
+    glob_t glob_result;
+    memset(&glob_result, 0, sizeof(glob_result));
+    
+    int ret = glob("/sys/class/pwm/pwmchip*", GLOB_TILDE, nullptr, &glob_result);
+    if (ret == 0)
+    {
+        // Sort paths to check in order
+        std::vector<std::string> chipPaths;
+        for (size_t i = 0; i < glob_result.gl_pathc; i++)
+        {
+            chipPaths.push_back(glob_result.gl_pathv[i]);
+        }
+        std::sort(chipPaths.begin(), chipPaths.end());
+        
+        // Check each pwmchip for sufficient channels
+        for (const auto& chipPath : chipPaths)
+        {
+            try
+            {
+                // Extract chip number from path (e.g., "/sys/class/pwm/pwmchip2" -> 2)
+                std::string chipNumStr = chipPath.substr(strlen("/sys/class/pwm/pwmchip"));
+                int chipNum = std::stoi(chipNumStr);
+                
+                // Check npwm file
+                std::string npwmPath = chipPath + "/npwm";
+                std::ifstream npwmFile(npwmPath);
+                if (npwmFile.is_open())
+                {
+                    int npwm = 0;
+                    npwmFile >> npwm;
+                    npwmFile.close();
+                    
+                    // Check if chip directory exists and has enough channels
+                    if (npwm >= 2 && access(chipPath.c_str(), F_OK) == 0)
+                    {
+                        globfree(&glob_result);
+                        LOGF_INFO("Auto-detected pwmchip%d with %d channels", chipNum, npwm);
+                        return chipNum;
+                    }
+                }
+            }
+            catch (...)
+            {
+                // Skip invalid chip paths
+                continue;
+            }
+        }
+        globfree(&glob_result);
+    }
+    
+    // Fallback: try Pi 4 default (pwmchip0)
+    if (access("/sys/class/pwm/pwmchip0", F_OK) == 0)
+    {
+        LOG_INFO("Using fallback pwmchip0");
+        return 0;
+    }
+    
+    // No PWM chip found
+    LOG_ERROR("No PWM chip found with sufficient channels (>=2). Check dtoverlay configuration.");
+    return -1;
 }
 
 int AstrAlimHeater::getPWMChannel(int heaterChannel)
@@ -373,6 +431,20 @@ int AstrAlimHeater::getPWMChannel(int heaterChannel)
 bool AstrAlimHeater::initPWM()
 {
     pwmChip = getPWMChip();
+    
+    if (pwmChip < 0)
+    {
+        LOG_ERROR("Failed to detect PWM chip. Check dtoverlay configuration in /boot/firmware/config.txt and reboot.");
+        return false;
+    }
+    
+    // Verify pwmchip exists
+    std::string chipPath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip);
+    if (access(chipPath.c_str(), F_OK) != 0)
+    {
+        LOGF_ERROR("PWM chip %d not available. Check dtoverlay configuration.", pwmChip);
+        return false;
+    }
     
     for (int ch = 0; ch < 2; ch++)
     {
