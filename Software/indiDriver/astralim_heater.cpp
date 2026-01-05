@@ -419,8 +419,11 @@ int AstrAlimHeater::getPWMChip()
 
 int AstrAlimHeater::getPWMChannel(int heaterChannel)
 {
-    // Pi 5: PWM1 = channel 1, PWM2 = channel 2
-    // Pi 4: PWM1 = channel 0, PWM2 = channel 1
+    // Mapping des canaux PWM :
+    // Pi 5: Heater 1 (channel 0) → PWM channel 1 (GPIO 18, INA 0x49, AstraPwm1)
+    //       Heater 2 (channel 1) → PWM channel 2 (GPIO 13, INA 0x4d, AstraPwm2)
+    // Pi 4: Heater 1 (channel 0) → PWM channel 0
+    //       Heater 2 (channel 1) → PWM channel 1
     std::string model = execCommand("cat /sys/firmware/devicetree/base/model 2>/dev/null");
     if (model.find("Pi 5") != std::string::npos)
         return heaterChannel + 1;
@@ -1009,7 +1012,7 @@ void AstrAlimHeater::readINA219()
     std::istringstream iss(result);
     std::string heaterData;
     
-    // Heater 1 (AstraPwm1, address 0x49)
+    // Heater 1 (AstraPwm1, address 0x49, GPIO 18, PWM channel 1)
     if (std::getline(iss, heaterData, '|'))
     {
         double v = 0, c = 0;
@@ -1023,7 +1026,7 @@ void AstrAlimHeater::readINA219()
         PowerMonitorNP[PWR_CURRENT1].setValue(0);
     }
     
-    // Heater 2 (AstraPwm2, address 0x4d)
+    // Heater 2 (AstraPwm2, address 0x4d, GPIO 13, PWM channel 2)
     if (std::getline(iss, heaterData, '|'))
     {
         double v = 0, c = 0;
