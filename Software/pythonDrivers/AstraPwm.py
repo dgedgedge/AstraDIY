@@ -242,12 +242,12 @@ class AstraPwm():
         self.period_ms=1
         # Si chip est None, SysPWM fera l'auto-détection
         chip_value = self.inacaract["chip"]
+        pwm_channel = self.inacaract["pwm"]
         if chip_value is None:
-            print(f"[DEBUG AstraPwm.__init__] {self.name}: Auto-détection du pwmchip en cours...")
-        self.pwm = SysPWM(chip_value, self.inacaract["pwm"])
+            print(f"[DEBUG AstraPwm.__init__] {self.name}: Auto-détection du pwmchip en cours pour le canal {pwm_channel}...")
+        self.pwm = SysPWM(chip_value, pwm_channel)
         # Log du pwmchip utilisé (sera affiché par SysPWM si auto-détecté)
-        if chip_value is not None:
-            print(f"[DEBUG AstraPwm.__init__] {self.name}: Utilisation de pwmchip{chip_value}, canal {self.inacaract['pwm']}")
+        print(f"[DEBUG AstraPwm.__init__] {self.name}: PWM initialisé - pwmchip{self.pwm.chip}, canal {pwm_channel}, ratio={self.ratio}%")
         if self.pwm.get_periode_ms() > 0:
             self.pwm.set_duty_ms(0)
         self.pwm.set_periode_ms(self.period_ms)
@@ -412,10 +412,16 @@ class AstraPwm():
 
     # set output
     def set_ratio(self, ratio):
+        old_ratio = self.ratio
         self.ratio=max(0, min(100,int(ratio*10)/10))
         duty=self.period_ms*self.ratio/100.0
         self.pwm.set_duty_ms(duty)
-        #print("AstraPwm.set_ratio(",self.ratio,")","=>",duty)
+        # Log périodique pour debug (toutes les 10 changements significatifs)
+        if not hasattr(self, '_set_ratio_counter'):
+            self._set_ratio_counter = 0
+        self._set_ratio_counter += 1
+        if abs(old_ratio - self.ratio) > 1.0 or self._set_ratio_counter % 10 == 0:
+            print(f"[DEBUG AstraPwm.set_ratio] {self.name}: ratio={self.ratio:.1f}% => duty={duty:.3f}ms (pwmchip{self.pwm.chip}, canal {self.inacaract['pwm']})")
 
     def get_ratio(self):
         #print("AstraPwm.get_ratio(",self.ratio,")")

@@ -157,17 +157,19 @@ class AstraIna:
         else:
             if self.name in self.ina219_set:
                 self.caract=self.ina219_set[self.name]  # Utiliser self.name au lieu de name pour cohérence
-                print(f"[DEBUG AstraIna.__init__] {self.name}: Configuration trouvée, address=0x{self.caract['address']:x}, pwm={self.caract.get('pwm', 'N/A')}")
+                # Définir self.address AVANT de créer l'INA219 et d'appeler configure()
+                self.address = self.caract["address"]
+                print(f"[DEBUG AstraIna.__init__] {self.name}: Configuration trouvée, address=0x{self.address:x}, pwm={self.caract.get('pwm', 'N/A')}")
                 self.ina219 = INA219(
                     shunt_ohms=self.caract["shunt_ohms"], 
                     max_expected_amps=self.caract["max_expected_amps"], 
                     busnum=self.caract["busnum"], 
-                    address=self.caract["address"], 
+                    address=self.address, 
                     log_level=log_level)
                 # Temp fetcher
                 self.AstraInaFetcher = AstraInaFetcher.get_instance()
                 self.configure(bus_adc=self.caract["bus_adc"], shunt_adc=self.caract["shunt_adc"])
-                print(f"[DEBUG AstraIna.__init__] {self.name}: INA219 créé et configuré, address=0x{self.caract['address']:x}")
+                print(f"[DEBUG AstraIna.__init__] {self.name}: INA219 créé et configuré, address=0x{self.address:x}")
             else:
                 raise Exception("Unkown AstraIna")
 
