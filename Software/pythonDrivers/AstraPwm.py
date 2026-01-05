@@ -234,11 +234,11 @@ class AstraPwm():
     TEMPUNAVAIL=AstraTempFetcher.TEMPUNAVAIL
     astraGpioSet = { 
                 "AstraPwm1": {
-                    "pi5": { "chip":None, "pwm":2 },  # Canal 2 = GPIO 18 (inversé car pwmchip0 mapping différent de pwmchip2)
+                    "pi5": { "chip":None, "pwm":0 },  # Canal 0 = GPIO 18 (premier paramètre de pwm-2chan: pin=18)
                     "pi4": { "chip":0, "pwm":0 },
                               },
                 "AstraPwm2": {
-                    "pi5": { "chip":None, "pwm":1 },  # Canal 1 = GPIO 13 (inversé car pwmchip0 mapping différent de pwmchip2)
+                    "pi5": { "chip":None, "pwm":1 },  # Canal 1 = GPIO 13 (second paramètre de pwm-2chan: pin2=13)
                     "pi4": { "chip":0, "pwm":1 },
                 }
     }
