@@ -156,7 +156,8 @@ class AstraIna:
             self.AstraInaFetcher = AstraInaFetcher.get_instance()
         else:
             if self.name in self.ina219_set:
-                self.caract=self.ina219_set[name]
+                self.caract=self.ina219_set[self.name]  # Utiliser self.name au lieu de name pour cohérence
+                print(f"[DEBUG AstraIna.__init__] {self.name}: Configuration trouvée, address=0x{self.caract['address']:x}, pwm={self.caract.get('pwm', 'N/A')}")
                 self.ina219 = INA219(
                     shunt_ohms=self.caract["shunt_ohms"], 
                     max_expected_amps=self.caract["max_expected_amps"], 
@@ -166,6 +167,7 @@ class AstraIna:
                 # Temp fetcher
                 self.AstraInaFetcher = AstraInaFetcher.get_instance()
                 self.configure(bus_adc=self.caract["bus_adc"], shunt_adc=self.caract["shunt_adc"])
+                print(f"[DEBUG AstraIna.__init__] {self.name}: INA219 créé et configuré, address=0x{self.caract['address']:x}")
             else:
                 raise Exception("Unkown AstraIna")
 
@@ -234,10 +236,18 @@ class AstraIna:
                 self._lasttimeS=curtimeS
                 self._intPeriodS=curtimeS-self.firstttime
                 self.pingOk = True
+                # Debug périodique pour les PWM (toutes les 50 lectures environ)
+                if not hasattr(self, '_debug_counter'):
+                    self._debug_counter = 0
+                self._debug_counter += 1
+                if "Pwm" in self.name and self._debug_counter % 50 == 0:
+                    print(f"[DEBUG getDataFromIna] {self.name}: V={self._voltageV:.2f}V, A={self._currentmA/1000:.3f}A, W={self._powermW/1000:.2f}W, pingOK={self.pingOk}, configSend={self.configurationSend}")
             except (OSError, IOError) as e:
                 # Erreur I2C - le capteur peut être temporairement indisponible
                 self.pingOk = False
                 # Conserver les dernières valeurs valides
+                if "Pwm" in self.name:
+                    print(f"[DEBUG getDataFromIna] {self.name}: ERREUR I2C - {e}")
                 pass
     
     def configure(self, voltage_range=INA219.RANGE_16V, gain=INA219.GAIN_AUTO, bus_adc=INA219.ADC_12BIT, shunt_adc=INA219.ADC_12BIT):
