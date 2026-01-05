@@ -104,11 +104,11 @@ class AstraIna:
                          "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
             "AstraDc3": {"ispwm":False, "busnum":1, "address": 0x46, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 40, 
                          "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
-            "AstraPwm1": {"ispwm":True, "busnum":1, "address": 0x49, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":2, "pwm":1, 
+            "AstraPwm1": {"ispwm":True, "busnum":1, "address": 0x49, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":None, "pwm":1, 
                          "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
-            "AstraPwm2": {"ispwm":True, "busnum":1, "address": 0x4d, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":2, "pwm":2, 
+            "AstraPwm2": {"ispwm":True, "busnum":1, "address": 0x4d, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":None, "pwm":2, 
                          "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
-            "AstOnStep": {"ispwm":True, "busnum":1, "address": 0x40, "shunt_ohms": 0.005, "max_expected_amps": 6, "chip":2, "pwm":2, 
+            "AstOnStep": {"ispwm":True, "busnum":1, "address": 0x40, "shunt_ohms": 0.005, "max_expected_amps": 6, "chip":None, "pwm":2, 
                          "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP }
     }
 

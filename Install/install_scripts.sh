@@ -45,6 +45,14 @@ do
 		cp ${PYTHONDRIVERSDIR}/${FILE} $INSTALLDIR
 	fi
 done
+# Copier les fichiers de diagnostic (optionnel, pour le débogage)
+for FILE in ${PYTHONDRIVERSDIR}/test_*.py
+do
+	if [ -f "$FILE" ]; then
+		cp "$FILE" $INSTALLDIR
+		chmod a+rx "$INSTALLDIR/$(basename "$FILE")"
+	fi
+done
 
 # Copier les répertoires logo et lib (avec leur structure complète)
 if [ -d "${PYTHONDRIVERSDIR}/logo" ]; then

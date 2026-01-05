@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os.path
+import glob
 
 # Copyright 2018 Jeremy Impson <jdimpson@acm.org>
 
@@ -21,6 +22,24 @@ import time
 class SysPWMException(Exception):
     pass
 
+def find_pwmchip_with_channels(min_channels=2):
+    """
+    Détecte dynamiquement un pwmchip avec au moins min_channels canaux disponibles.
+    Retourne (chip_number, npwm) ou (None, 0) si aucun trouvé.
+    """
+    for chip_path in sorted(glob.glob("/sys/class/pwm/pwmchip*")):
+        try:
+            chip_num = int(chip_path.replace("/sys/class/pwm/pwmchip", ""))
+            npwm_path = os.path.join(chip_path, "npwm")
+            if os.path.exists(npwm_path):
+                with open(npwm_path, 'r') as f:
+                    npwm = int(f.read().strip())
+                if npwm >= min_channels:
+                    return chip_num, npwm
+        except (ValueError, IOError):
+            continue
+    return None, 0
+
 # /sys/ pwm interface described here: http://www.jumpnowtek.com/rpi/Using-the-Raspberry-Pi-Hardware-PWM-timers.html
 class SysPWM(object):
     chippath = "/sys/class/pwm/pwmchip"
@@ -28,18 +47,28 @@ class SysPWM(object):
     def __init__(self,chip,pwm):
         self.retry=5
         self.pwm=pwm
+        
+        # Auto-détection du pwmchip si chip est None
+        if chip is None:
+            detected_chip, npwm = find_pwmchip_with_channels(min_channels=2)
+            if detected_chip is None:
+                raise SysPWMException("No PWM chip found with sufficient channels (>=2). Check dtoverlay configuration in /boot/firmware/config.txt and reboot.")
+            chip = detected_chip
+            print(f"[SysPWM] Auto-detected pwmchip{chip} with {npwm} channels")
+        
         self.chippath="{chippath}{num}".format(chippath=self.chippath, num=chip)
         self.pwmdir="{chippath}/pwm{pwm}".format(chippath=self.chippath, pwm=self.pwm)
-        if not self.overlay_loaded():
+        if not self.pwmchip_available():
             print("On="+self.chippath)
-            raise SysPWMException("Need to add 'dtoverlay=pwm-2chan' to /boot/firmware/config.txt and reboot")
+            raise SysPWMException("PWM chip {chip} not available. Check dtoverlay configuration in /boot/firmware/config.txt and reboot.".format(chip=chip))
         if not self.export_writable():
             raise SysPWMException("Need write access to files in '{chippath}'".format(chippath=self.chippath))
         if not self.pwmX_exists():
             self.create_pwmX()
         return
 
-    def overlay_loaded(self):
+    def pwmchip_available(self):
+        """Vérifie si le pwmchip est disponible (anciennement overlay_loaded)."""
         return os.path.isdir(self.chippath)
 
     def export_writable(self):

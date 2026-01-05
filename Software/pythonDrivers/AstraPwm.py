@@ -217,11 +217,11 @@ class AstraPwm():
     TEMPUNAVAIL=AstraTempFetcher.TEMPUNAVAIL
     astraGpioSet = { 
                 "AstraPwm1": {
-                    "pi5": { "chip":2, "pwm":1 },
+                    "pi5": { "chip":None, "pwm":1 },  # Auto-détection pour compatibilité kernel 6.12+
                     "pi4": { "chip":0, "pwm":0 },
                               },
                 "AstraPwm2": {
-                    "pi5": { "chip":2, "pwm":2 },
+                    "pi5": { "chip":None, "pwm":2 },  # Auto-détection pour compatibilité kernel 6.12+
                     "pi4": { "chip":0, "pwm":1 },
                 }
     }
@@ -240,7 +240,14 @@ class AstraPwm():
 
         self.ratio=0
         self.period_ms=1
-        self.pwm = SysPWM(self.inacaract["chip"],self.inacaract["pwm"])
+        # Si chip est None, SysPWM fera l'auto-détection
+        chip_value = self.inacaract["chip"]
+        if chip_value is None:
+            print(f"[DEBUG AstraPwm.__init__] {self.name}: Auto-détection du pwmchip en cours...")
+        self.pwm = SysPWM(chip_value, self.inacaract["pwm"])
+        # Log du pwmchip utilisé (sera affiché par SysPWM si auto-détecté)
+        if chip_value is not None:
+            print(f"[DEBUG AstraPwm.__init__] {self.name}: Utilisation de pwmchip{chip_value}, canal {self.inacaract['pwm']}")
         if self.pwm.get_periode_ms() > 0:
             self.pwm.set_duty_ms(0)
         self.pwm.set_periode_ms(self.period_ms)
