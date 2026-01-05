@@ -30,17 +30,26 @@ class AstraInaFetcher(threading.Thread):
 
 
     def run(self):
+        debug_counter = 0
         while self.running:
             ina:AstraIna=None
             time.sleep(0.4)
             try:
                 with self.listInalock:
                     totalEnergiemWS:float=0.0
+                    # Debug périodique pour voir quels INA sont dans la liste
+                    debug_counter += 1
+                    if debug_counter % 25 == 0:  # Toutes les ~10 secondes
+                        ina_names = [ina.getName() for ina in self.listIna]
+                        print(f"[DEBUG AstraInaFetcher.run] INA dans la liste ({len(self.listIna)}): {ina_names}")
+                    
                     for ina in self.listIna:
                         try:
                             ina.sendConfiguration()
                         except Exception as e:
-                            # Ignorer les erreurs individuelles pour ne pas bloquer les autres capteurs
+                            # Logger les erreurs pour les PWM
+                            if "Pwm" in ina.getName():
+                                print(f"[DEBUG AstraInaFetcher.run] ERREUR sendConfiguration pour {ina.getName()}: {e}")
                             pass
                     
                     time.sleep(0.1)
@@ -50,11 +59,14 @@ class AstraInaFetcher(threading.Thread):
                             ina.getDataFromIna()
                             totalEnergiemWS+=ina.energiemWS()
                         except Exception as e:
-                            # Ignorer les erreurs individuelles pour ne pas bloquer les autres capteurs
+                            # Logger les erreurs pour les PWM
+                            if "Pwm" in ina.getName():
+                                print(f"[DEBUG AstraInaFetcher.run] ERREUR getDataFromIna pour {ina.getName()}: {e}")
                             pass
                     self.totalEnergiemWS=totalEnergiemWS
             except Exception as e:
                 # En cas d'erreur générale, continuer la boucle
+                print(f"[DEBUG AstraInaFetcher.run] ERREUR GÉNÉRALE: {e}")
                 time.sleep(0.5)
                 pass
 
@@ -198,16 +210,28 @@ class AstraIna:
                         bus_adc=self.bus_adc, 
                         shunt_adc=self.shunt_adc)
                     self.configurationSend = True
+                    self.pingOk = True
                 except (OSError, IOError) as e:
                     # Erreur I2C - le capteur peut être temporairement indisponible
                     self.pingOk = False
                     self.configurationSend = False
-                    # Ne pas logger pour éviter le spam, juste ignorer silencieusement
-                    pass
+                    # Logger les erreurs pour les PWM
+                    if "Pwm" in self.name:
+                        if not hasattr(self, '_ping_error_counter'):
+                            self._ping_error_counter = 0
+                        self._ping_error_counter += 1
+                        if self._ping_error_counter % 10 == 0:  # Logger toutes les 10 erreurs
+                            print(f"[DEBUG sendConfiguration] {self.name}: ERREUR I2C configure - {e}")
         except (OSError, IOError) as e:
             # Erreur I2C lors du ping
             self.pingOk = False
             self.configurationSend = False
+            if "Pwm" in self.name:
+                if not hasattr(self, '_ping_error_counter'):
+                    self._ping_error_counter = 0
+                self._ping_error_counter += 1
+                if self._ping_error_counter % 10 == 0:  # Logger toutes les 10 erreurs
+                    print(f"[DEBUG sendConfiguration] {self.name}: ERREUR I2C ping - {e}")
             pass            
         
     def getPingOK(self)->bool:
@@ -224,33 +248,46 @@ class AstraIna:
         The method is not threadsafe and shall be called by a uniq thread.
         It is considered that the last measure OK is cummulated in the energy.
         """
-        if self.configurationSend:
-            try:
-                curtimeS=time.perf_counter()
-                deltatimeS=curtimeS-self._lasttimeS
-                if not self.ina219.current_overflow():
-                    self._shuntVoltagemV = max(self.ina219.shunt_voltage(), 0.0)
-                    self._voltageV = max(float(self.ina219.voltage()),0.0)
-                    self._currentmA = max(float(self.ina219.current()), 0.0)
-                    self._powermW = max(float(self.ina219.power()),0.0)
-                energiemWS=self._powermW * deltatimeS
-                self._energiemWS += energiemWS
-                self._lasttimeS=curtimeS
-                self._intPeriodS=curtimeS-self.firstttime
-                self.pingOk = True
-                # Debug périodique pour les PWM (toutes les 50 lectures environ)
-                if not hasattr(self, '_debug_counter'):
-                    self._debug_counter = 0
-                self._debug_counter += 1
-                if "Pwm" in self.name and self._debug_counter % 50 == 0:
-                    print(f"[DEBUG getDataFromIna] {self.name}: V={self._voltageV:.2f}V, A={self._currentmA/1000:.3f}A, W={self._powermW/1000:.2f}W, pingOK={self.pingOk}, configSend={self.configurationSend}")
-            except (OSError, IOError) as e:
-                # Erreur I2C - le capteur peut être temporairement indisponible
-                self.pingOk = False
-                # Conserver les dernières valeurs valides
-                if "Pwm" in self.name:
-                    print(f"[DEBUG getDataFromIna] {self.name}: ERREUR I2C - {e}")
-                pass
+        if not self.configurationSend:
+            # Logger si configurationSend est False pour les PWM
+            if "Pwm" in self.name:
+                if not hasattr(self, '_config_false_counter'):
+                    self._config_false_counter = 0
+                self._config_false_counter += 1
+                if self._config_false_counter % 25 == 0:  # Logger toutes les 25 fois (~10 secondes)
+                    print(f"[DEBUG getDataFromIna] {self.name}: configurationSend=False, pingOK={self.pingOk} - lecture ignorée")
+            return
+        
+        try:
+            curtimeS=time.perf_counter()
+            deltatimeS=curtimeS-self._lasttimeS
+            if not self.ina219.current_overflow():
+                self._shuntVoltagemV = max(self.ina219.shunt_voltage(), 0.0)
+                self._voltageV = max(float(self.ina219.voltage()),0.0)
+                self._currentmA = max(float(self.ina219.current()), 0.0)
+                self._powermW = max(float(self.ina219.power()),0.0)
+            energiemWS=self._powermW * deltatimeS
+            self._energiemWS += energiemWS
+            self._lasttimeS=curtimeS
+            self._intPeriodS=curtimeS-self.firstttime
+            self.pingOk = True
+            # Debug périodique pour les PWM (toutes les 50 lectures environ)
+            if not hasattr(self, '_debug_counter'):
+                self._debug_counter = 0
+            self._debug_counter += 1
+            if "Pwm" in self.name and self._debug_counter % 50 == 0:
+                print(f"[DEBUG getDataFromIna] {self.name}: V={self._voltageV:.2f}V, A={self._currentmA/1000:.3f}A, W={self._powermW/1000:.2f}W, pingOK={self.pingOk}, configSend={self.configurationSend}")
+        except (OSError, IOError) as e:
+            # Erreur I2C - le capteur peut être temporairement indisponible
+            self.pingOk = False
+            # Conserver les dernières valeurs valides
+            if "Pwm" in self.name:
+                if not hasattr(self, '_read_error_counter'):
+                    self._read_error_counter = 0
+                self._read_error_counter += 1
+                if self._read_error_counter % 10 == 0:  # Logger toutes les 10 erreurs
+                    print(f"[DEBUG getDataFromIna] {self.name}: ERREUR I2C lecture - {e}")
+            pass
     
     def configure(self, voltage_range=INA219.RANGE_16V, gain=INA219.GAIN_AUTO, bus_adc=INA219.ADC_12BIT, shunt_adc=INA219.ADC_12BIT):
         if self.configured:
