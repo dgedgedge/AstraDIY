@@ -4,7 +4,13 @@ Script de diagnostic pour vérifier les mesures INA219
 Utile pour déboguer les problèmes de mesure de courant avec PWM
 """
 import sys
+import os
 import time
+# Ajouter le répertoire parent au path (tests/ -> pythonDrivers/)
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 from AstraIna import AstraIna
 
 def main():

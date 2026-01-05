@@ -4,7 +4,13 @@ Script pour scanner toutes les adresses INA219 sur le bus I2C
 et afficher les valeurs de tension, courant et puissance pour chaque INA détecté.
 """
 import sys
+import os
 import time
+# Ajouter le répertoire parent au path (tests/ -> pythonDrivers/)
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 from lib.ina219 import INA219
 
 def scan_ina219_addresses(busnum=1, shunt_ohms=0.01, max_expected_amps=6):
