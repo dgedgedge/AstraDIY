@@ -190,8 +190,54 @@ class SysPWM(object):
         except Exception as e:
             gpio_info["error"] = str(e)
         
+        # Essayer de lire le GPIO depuis le device tree via /proc/device-tree
+        try:
+            # Chercher dans /proc/device-tree pour trouver le mapping GPIO
+            device_tree_base = "/proc/device-tree"
+            if os.path.exists(device_tree_base):
+                # Chercher les overlays PWM
+                for root, dirs, files in os.walk(device_tree_base):
+                    # Chercher les nœuds qui contiennent "pwm" ou "18" ou "13"
+                    for d in dirs:
+                        if "pwm" in d.lower():
+                            node_path = os.path.join(root, d)
+                            # Lire les propriétés
+                            for prop_file in ["pinctrl-names", "pinctrl-0", "status"]:
+                                prop_path = os.path.join(node_path, prop_file)
+                                if os.path.exists(prop_path):
+                                    try:
+                                        with open(prop_path, 'rb') as f:
+                                            content = f.read()
+                                            gpio_info[f"dt_{prop_file}"] = content.decode('utf-8', errors='ignore')[:100]
+                                    except:
+                                        pass
+        except Exception as e:
+            gpio_info["dt_error"] = str(e)
+        
+        # Essayer de lire depuis /sys/kernel/debug/pinctrl pour obtenir le GPIO réel
+        try:
+            pinctrl_base = "/sys/kernel/debug/pinctrl"
+            if os.path.exists(pinctrl_base):
+                for pinctrl_dir in os.listdir(pinctrl_base):
+                    if "pwm" in pinctrl_dir.lower():
+                        pinctrl_path = os.path.join(pinctrl_base, pinctrl_dir)
+                        # Lire gpio-ranges
+                        gpio_ranges_path = os.path.join(pinctrl_path, "gpio-ranges")
+                        if os.path.exists(gpio_ranges_path):
+                            with open(gpio_ranges_path, 'r') as f:
+                                ranges = f.read()
+                                gpio_info["pinctrl_ranges"] = ranges
+                                # Parser pour trouver le GPIO correspondant au canal
+                                for line in ranges.split('\n'):
+                                    if 'gpio' in line.lower() and ('13' in line or '18' in line):
+                                        gpio_info["pinctrl_gpio_line"] = line
+        except Exception as e:
+            gpio_info["pinctrl_error"] = str(e)
+        
         # Afficher dans la console pour diagnostic immédiat
         print(f"[DEBUG GPIO MAPPING] pwmchip{self.chip} canal {self.pwm}: GPIO={gpio_number}, path={self.pwmdir}, info={gpio_info.get('gpio_from_path', 'N/A')}")
+        if gpio_info.get('pinctrl_gpio_line'):
+            print(f"[DEBUG GPIO MAPPING] pwmchip{self.chip} canal {self.pwm}: pinctrl info = {gpio_info.get('pinctrl_gpio_line')}")
         # #region agent log
         _write_debug_log("debug-session", "init", "A,D", "syspwm.py:create_pwmX", "After export - GPIO mapping", {"export_success":result,"pwmX_exists":self.pwmX_exists(),"pwmdir":self.pwmdir,"chip":self.chip,"pwm":self.pwm,"gpio_info":gpio_info})
         # #endregion
