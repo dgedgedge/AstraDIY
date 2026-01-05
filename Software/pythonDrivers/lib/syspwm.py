@@ -130,10 +130,12 @@ class SysPWM(object):
 
     def create_pwmX(self):
         pwmexport = "{chippath}/export".format(chippath=self.chippath)
+        print(f"[DEBUG create_pwmX] pwmchip{self.chip} canal {self.pwm}: Export vers {pwmexport}")
         # #region agent log
         _write_debug_log("debug-session", "init", "C", "syspwm.py:create_pwmX", "Exporting PWM channel", {"pwm":self.pwm,"export_path":pwmexport,"chip":self.chip})
         # #endregion
         result = self.echo(self.pwm,pwmexport)
+        print(f"[DEBUG create_pwmX] pwmchip{self.chip} canal {self.pwm}: Export résultat={result}, pwmdir existe={os.path.exists(self.pwmdir)}")
         # Lire le GPIO réellement utilisé après export
         gpio_info = {}
         gpio_number = None
