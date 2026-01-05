@@ -271,16 +271,28 @@ class AstraIna:
                 raw_power_mW = float(self.ina219.power())
                 
                 # Debug pour voir les valeurs brutes AVANT inversion (pour AstraPwm1)
-                if self.name == "AstraPwm1" and not hasattr(self, '_pre_invert_logged'):
-                    print(f"[DEBUG getDataFromIna] {self.name}: AVANT inversion - shunt={raw_shunt_mV:.3f}mV, V={raw_voltage_V:.3f}V, I={raw_current_mA:.3f}mA, P={raw_power_mW:.3f}mW")
-                    self._pre_invert_logged = True
+                if self.name == "AstraPwm1":
+                    if not hasattr(self, '_pre_invert_logged'):
+                        print(f"[DEBUG getDataFromIna] {self.name}: AVANT inversion - shunt={raw_shunt_mV:.3f}mV, V={raw_voltage_V:.3f}V, I={raw_current_mA:.3f}mA, P={raw_power_mW:.3f}mW")
+                        self._pre_invert_logged = True
                 
                 # Inverser la polarité pour AstraPwm1 (le shunt est monté dans le sens inverse)
+                # ATTENTION: Si le courant brut est déjà positif, l'inversion peut ne plus être nécessaire
                 if self.name == "AstraPwm1":
+                    raw_shunt_mV_before = raw_shunt_mV
+                    raw_current_mA_before = raw_current_mA
                     raw_shunt_mV = -raw_shunt_mV
                     raw_current_mA = -raw_current_mA
                     # Recalculer la puissance avec les valeurs inversées (P = V * I)
                     raw_power_mW = raw_voltage_V * raw_current_mA
+                    
+                    # Debug périodique pour AstraPwm1
+                    if not hasattr(self, '_pwm1_debug_counter'):
+                        self._pwm1_debug_counter = 0
+                    self._pwm1_debug_counter += 1
+                    if self._pwm1_debug_counter % 10 == 0:  # Toutes les 10 lectures (~4 secondes)
+                        print(f"[DEBUG getDataFromIna] {self.name}: AVANT inversion - shunt={raw_shunt_mV_before:.3f}mV, I={raw_current_mA_before:.3f}mA")
+                        print(f"[DEBUG getDataFromIna] {self.name}: APRÈS inversion - shunt={raw_shunt_mV:.3f}mV, I={raw_current_mA:.3f}mA")
                 
                 self._shuntVoltagemV = max(raw_shunt_mV, 0.0)
                 self._voltageV = max(raw_voltage_V, 0.0)
@@ -293,7 +305,7 @@ class AstraIna:
                         self._debug_counter = 0
                     self._debug_counter += 1
                     if self._debug_counter % 25 == 0:
-                        print(f"[DEBUG getDataFromIna] {self.name}: RAW - shunt={raw_shunt_mV:.3f}mV, V={raw_voltage_V:.3f}V, I={raw_current_mA:.3f}mA, P={raw_power_mW:.3f}mW")
+                        print(f"[DEBUG getDataFromIna] {self.name}: RAW (après inversion si Pwm1) - shunt={raw_shunt_mV:.3f}mV, V={raw_voltage_V:.3f}V, I={raw_current_mA:.3f}mA, P={raw_power_mW:.3f}mW")
                         print(f"[DEBUG getDataFromIna] {self.name}: AFTER max(0) - shunt={self._shuntVoltagemV:.3f}mV, V={self._voltageV:.3f}V, I={self._currentmA:.3f}mA, P={self._powermW:.3f}mW, overflow={self.ina219.current_overflow()}")
             else:
                 # Logger si overflow
