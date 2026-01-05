@@ -56,6 +56,8 @@ class SysPWM(object):
             chip = detected_chip
             print(f"[SysPWM] Auto-detected pwmchip{chip} with {npwm} channels")
         
+        # Stocker le numéro du chip pour accès ultérieur
+        self.chip = chip
         self.chippath="{chippath}{num}".format(chippath=self.chippath, num=chip)
         self.pwmdir="{chippath}/pwm{pwm}".format(chippath=self.chippath, pwm=self.pwm)
         if not self.pwmchip_available():
