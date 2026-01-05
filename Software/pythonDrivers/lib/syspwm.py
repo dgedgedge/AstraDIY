@@ -27,10 +27,8 @@ class SysPWMException(Exception):
 
 def _get_debug_log_path():
     """Retourne le chemin du fichier de log de debug"""
-    try:
-        return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".cursor", "debug.log")
-    except:
-        return "/tmp/astradiy_debug.log"
+    # Utiliser /tmp pour éviter les problèmes de permissions
+    return "/tmp/astradiy_debug.log"
 
 def _write_debug_log(session_id, run_id, hypothesis_id, location, message, data):
     """Écrit un log de debug"""
@@ -138,6 +136,7 @@ class SysPWM(object):
         result = self.echo(self.pwm,pwmexport)
         # Lire le GPIO réellement utilisé après export
         gpio_info = {}
+        gpio_number = None
         try:
             if os.path.exists(self.pwmdir):
                 # Lire uevent pour obtenir les informations du périphérique
@@ -146,6 +145,10 @@ class SysPWM(object):
                     with open(uevent_path, 'r') as f:
                         uevent_content = f.read()
                         gpio_info["uevent"] = uevent_content
+                        # Extraire GPIO depuis uevent si présent
+                        for line in uevent_content.split('\n'):
+                            if 'GPIO' in line.upper() or 'PIN' in line.upper():
+                                gpio_info["uevent_gpio_line"] = line
                 
                 # Chercher le lien symbolique pour obtenir le chemin du périphérique
                 if os.path.islink(self.pwmdir):
@@ -157,6 +160,11 @@ class SysPWM(object):
                         for part in parts:
                             if "gpio" in part.lower():
                                 gpio_info["gpio_from_path"] = part
+                                # Essayer d'extraire le numéro
+                                import re
+                                match = re.search(r'(\d+)', part)
+                                if match:
+                                    gpio_number = int(match.group(1))
                                 break
                 
                 # Lire le fichier device/of_node pour obtenir le GPIO depuis le device tree
@@ -179,6 +187,9 @@ class SysPWM(object):
                                 pass
         except Exception as e:
             gpio_info["error"] = str(e)
+        
+        # Afficher dans la console pour diagnostic immédiat
+        print(f"[DEBUG GPIO MAPPING] pwmchip{self.chip} canal {self.pwm}: GPIO={gpio_number}, path={self.pwmdir}, info={gpio_info.get('gpio_from_path', 'N/A')}")
         # #region agent log
         _write_debug_log("debug-session", "init", "A,D", "syspwm.py:create_pwmX", "After export - GPIO mapping", {"export_success":result,"pwmX_exists":self.pwmX_exists(),"pwmdir":self.pwmdir,"chip":self.chip,"pwm":self.pwm,"gpio_info":gpio_info})
         # #endregion

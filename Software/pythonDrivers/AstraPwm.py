@@ -16,11 +16,8 @@ import math
 
 def _get_debug_log_path():
     """Retourne le chemin du fichier de log de debug"""
-    try:
-        import os
-        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
-    except:
-        return "/tmp/astradiy_debug.log"
+    # Utiliser /tmp pour éviter les problèmes de permissions
+    return "/tmp/astradiy_debug.log"
 
 def _write_debug_log(session_id, run_id, hypothesis_id, location, message, data):
     """Écrit un log de debug"""
