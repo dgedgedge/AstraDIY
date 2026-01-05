@@ -277,10 +277,10 @@ class SysPWM(object):
             if os.path.exists(duty_cycle):
                 with open(duty_cycle, 'r') as f:
                     duty_value = f.read().strip()
-                    if self.pwm == 1:  # Logger seulement pour le canal 1 (AstraPwm2) pour debug
+                    if self.pwm == 0 or self.pwm == 1 or self.pwm == 2:  # Logger pour les canaux 0, 1, 2 pour debug
                         print(f"[DEBUG set_duty_us] pwmchip{self.chip} canal {self.pwm}: duty_cycle={duty_value}ns (écrit={dc}ns), echo_result={result}")
         except Exception as e:
-            if self.pwm == 1:
+            if self.pwm == 0 or self.pwm == 1 or self.pwm == 2:
                 print(f"[DEBUG set_duty_us] Erreur lors de la vérification: {e}")
 
     def set_duty_ms(self,milliseconds):
@@ -312,10 +312,10 @@ class SysPWM(object):
             if os.path.exists(period):
                 with open(period, 'r') as f:
                     period_value = f.read().strip()
-                    if self.pwm == 1:  # Logger seulement pour le canal 1 (AstraPwm2) pour debug
+                    if self.pwm == 0 or self.pwm == 1 or self.pwm == 2:  # Logger pour les canaux 0, 1, 2 pour debug
                         print(f"[DEBUG set_periode_us] pwmchip{self.chip} canal {self.pwm}: period={period_value}ns (écrit={per}ns), echo_result={result}")
         except Exception as e:
-            if self.pwm == 1:
+            if self.pwm == 0 or self.pwm == 1 or self.pwm == 2:
                 print(f"[DEBUG set_periode_us] Erreur lors de la vérification: {e}")
         return result
 
