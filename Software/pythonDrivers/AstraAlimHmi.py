@@ -263,8 +263,10 @@ class MainAlimWindow(QWidget):
         t_rca.setProperty("class", "section-title")
         content_layout.addWidget(t_rca)
         
-        for cfg in [("AstraPwm1", "Ligne RCA #1", "PWM1"),
-                    ("AstraPwm2", "Ligne RCA #2", "PWM2")]:
+        # CORRECTION: Inversion pour correspondre au mapping réel
+        # AstraPwm1 contrôle en fait l'INA 0x4d (AstraPwm2) et vice versa
+        for cfg in [("AstraPwm2", "Ligne RCA #1", "PWM1"),  # Inversé : AstraPwm2 lit 0x4d qui correspond à RCA #1
+                    ("AstraPwm1", "Ligne RCA #2", "PWM2")]:  # Inversé : AstraPwm1 lit 0x49 qui correspond à RCA #2
             w = AlimentationPwmControl(*cfg, parent=self)
             self.widgets.append(w)
             content_layout.addWidget(w)
