@@ -245,9 +245,22 @@ class AstraPwm():
         pwm_channel = self.inacaract["pwm"]
         if chip_value is None:
             print(f"[DEBUG AstraPwm.__init__] {self.name}: Auto-détection du pwmchip en cours pour le canal {pwm_channel}...")
+        # #region agent log
+        import json
+        try:
+            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"A,B,D","location":"AstraPwm.py:__init__","message":"Before SysPWM creation","data":{"name":self.name,"chip_value":chip_value,"pwm_channel":pwm_channel,"piModel":self.piModel},"timestamp":int(time.time()*1000)})+"\n")
+        except: pass
+        # #endregion
         self.pwm = SysPWM(chip_value, pwm_channel)
         # Log du pwmchip utilisé (sera affiché par SysPWM si auto-détecté)
         print(f"[DEBUG AstraPwm.__init__] {self.name}: PWM initialisé - pwmchip{self.pwm.chip}, canal {pwm_channel}, ratio={self.ratio}%")
+        # #region agent log
+        try:
+            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"A,B,D","location":"AstraPwm.py:__init__","message":"After SysPWM creation","data":{"name":self.name,"detected_chip":self.pwm.chip,"pwm_channel":pwm_channel,"pwmdir":self.pwm.pwmdir},"timestamp":int(time.time()*1000)})+"\n")
+        except: pass
+        # #endregion
         if self.pwm.get_periode_ms() > 0:
             self.pwm.set_duty_ms(0)
         self.pwm.set_periode_ms(self.period_ms)
@@ -415,6 +428,13 @@ class AstraPwm():
         old_ratio = self.ratio
         self.ratio=max(0, min(100,int(ratio*10)/10))
         duty=self.period_ms*self.ratio/100.0
+        # #region agent log
+        import json
+        try:
+            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"runtime","hypothesisId":"A,B,D,E","location":"AstraPwm.py:set_ratio","message":"Setting PWM ratio","data":{"name":self.name,"pwmchip":self.pwm.chip,"pwm_channel":self.inacaract["pwm"],"old_ratio":old_ratio,"new_ratio":self.ratio,"duty_ms":duty},"timestamp":int(time.time()*1000)})+"\n")
+        except: pass
+        # #endregion
         self.pwm.set_duty_ms(duty)
         # Log périodique pour debug (toutes les 10 changements significatifs)
         if not hasattr(self, '_set_ratio_counter'):

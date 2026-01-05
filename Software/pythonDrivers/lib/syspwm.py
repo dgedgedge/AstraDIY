@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import os.path
 import glob
+import json
+import time
 
 # Copyright 2018 Jeremy Impson <jdimpson@acm.org>
 
@@ -60,6 +62,14 @@ class SysPWM(object):
         self.chip = chip
         self.chippath="{chippath}{num}".format(chippath=self.chippath, num=chip)
         self.pwmdir="{chippath}/pwm{pwm}".format(chippath=self.chippath, pwm=self.pwm)
+        
+        # #region agent log
+        try:
+            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"A,B,C,D","location":"syspwm.py:__init__","message":"SysPWM init","data":{"chip":chip,"pwm":pwm,"chippath":self.chippath,"pwmdir":self.pwmdir,"chip_available":self.pwmchip_available(),"export_writable":self.export_writable(),"pwmX_exists":self.pwmX_exists()},"timestamp":int(time.time()*1000)})+"\n")
+        except: pass
+        # #endregion
+        
         if not self.pwmchip_available():
             print("On="+self.chippath)
             raise SysPWMException("PWM chip {chip} not available. Check dtoverlay configuration in /boot/firmware/config.txt and reboot.".format(chip=chip))
@@ -67,6 +77,13 @@ class SysPWM(object):
             raise SysPWMException("Need write access to files in '{chippath}'".format(chippath=self.chippath))
         if not self.pwmX_exists():
             self.create_pwmX()
+        
+        # #region agent log
+        try:
+            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"C","location":"syspwm.py:__init__","message":"After create_pwmX","data":{"pwmX_exists":self.pwmX_exists(),"pwmdir":self.pwmdir},"timestamp":int(time.time()*1000)})+"\n")
+        except: pass
+        # #endregion
         return
 
     def pwmchip_available(self):
@@ -103,13 +120,31 @@ class SysPWM(object):
 
     def create_pwmX(self):
         pwmexport = "{chippath}/export".format(chippath=self.chippath)
-        self.echo(self.pwm,pwmexport)
+        # #region agent log
+        try:
+            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"C","location":"syspwm.py:create_pwmX","message":"Exporting PWM channel","data":{"pwm":self.pwm,"export_path":pwmexport},"timestamp":int(time.time()*1000)})+"\n")
+        except: pass
+        # #endregion
+        result = self.echo(self.pwm,pwmexport)
+        # #region agent log
+        try:
+            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"C","location":"syspwm.py:create_pwmX","message":"After export","data":{"export_success":result,"pwmX_exists":self.pwmX_exists()},"timestamp":int(time.time()*1000)})+"\n")
+        except: pass
+        # #endregion
 
     def enable(self,disable=False):
         enable = "{pwmdir}/enable".format(pwmdir=self.pwmdir)
         num = 1
         if disable:
             num = 0
+        # #region agent log
+        try:
+            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"C","location":"syspwm.py:enable","message":"Enabling PWM","data":{"pwm":self.pwm,"chip":self.chip,"enable":num,"enable_path":enable},"timestamp":int(time.time()*1000)})+"\n")
+        except: pass
+        # #endregion
         self.echo(num,enable)
 
     def disable(self):
@@ -127,6 +162,12 @@ class SysPWM(object):
         # /sys/ iface, 2ms is 2000000
         # gpio cmd,    2ms is 200
         microsec = int(milliseconds * 1000)
+        # #region agent log
+        try:
+            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"runtime","hypothesisId":"E","location":"syspwm.py:set_duty_ms","message":"Setting duty cycle","data":{"pwm":self.pwm,"chip":self.chip,"duty_ms":milliseconds,"duty_us":microsec},"timestamp":int(time.time()*1000)})+"\n")
+        except: pass
+        # #endregion
         self.set_duty_us(microsec)
 
     def get_periode_ms(self):

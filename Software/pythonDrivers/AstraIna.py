@@ -268,6 +268,11 @@ class AstraIna:
                 raw_current_mA = float(self.ina219.current())
                 raw_power_mW = float(self.ina219.power())
                 
+                # Debug pour voir les valeurs brutes AVANT inversion (pour AstraPwm1)
+                if self.name == "AstraPwm1" and not hasattr(self, '_pre_invert_logged'):
+                    print(f"[DEBUG getDataFromIna] {self.name}: AVANT inversion - shunt={raw_shunt_mV:.3f}mV, V={raw_voltage_V:.3f}V, I={raw_current_mA:.3f}mA, P={raw_power_mW:.3f}mW")
+                    self._pre_invert_logged = True
+                
                 # Inverser la polarité pour AstraPwm1 (le shunt est monté dans le sens inverse)
                 if self.name == "AstraPwm1":
                     raw_shunt_mV = -raw_shunt_mV
