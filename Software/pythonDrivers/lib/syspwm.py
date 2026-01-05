@@ -204,7 +204,17 @@ class SysPWM(object):
         # #region agent log
         _write_debug_log("debug-session", "init", "C", "syspwm.py:enable", "Enabling PWM", {"pwm":self.pwm,"chip":self.chip,"enable":num,"enable_path":enable})
         # #endregion
-        self.echo(num,enable)
+        result = self.echo(num,enable)
+        # Vérifier que l'enable a bien fonctionné
+        try:
+            if os.path.exists(enable):
+                with open(enable, 'r') as f:
+                    enabled_value = f.read().strip()
+                    print(f"[DEBUG enable] pwmchip{self.chip} canal {self.pwm}: enable={enabled_value} (attendu={num}), echo_result={result}")
+                    if enabled_value != str(num):
+                        print(f"[DEBUG enable] ⚠️  ATTENTION: La valeur enable ne correspond pas! Attendu={num}, lu={enabled_value}")
+        except Exception as e:
+            print(f"[DEBUG enable] Erreur lors de la vérification: {e}")
 
     def disable(self):
         return self.enable(disable=True)
@@ -215,7 +225,17 @@ class SysPWM(object):
         dc = int(microsec * 1000)
         duty_cycle = "{pwmdir}/duty_cycle".format(pwmdir=self.pwmdir)
         #print(duty_cycle,self.chippath)
-        self.echo(dc,duty_cycle)
+        result = self.echo(dc,duty_cycle)
+        # Vérifier que le duty cycle a bien été écrit
+        try:
+            if os.path.exists(duty_cycle):
+                with open(duty_cycle, 'r') as f:
+                    duty_value = f.read().strip()
+                    if self.pwm == 1:  # Logger seulement pour le canal 1 (AstraPwm2) pour debug
+                        print(f"[DEBUG set_duty_us] pwmchip{self.chip} canal {self.pwm}: duty_cycle={duty_value}ns (écrit={dc}ns), echo_result={result}")
+        except Exception as e:
+            if self.pwm == 1:
+                print(f"[DEBUG set_duty_us] Erreur lors de la vérification: {e}")
 
     def set_duty_ms(self,milliseconds):
         # /sys/ iface, 2ms is 2000000
@@ -240,11 +260,22 @@ class SysPWM(object):
         per = int(per)
         period = "{pwmdir}/period".format(pwmdir=self.pwmdir)
         #print("periode:",per,", File:", period)
-        self.echo(per,period)
+        result = self.echo(per,period)
+        # Vérifier que la période a bien été écrite
+        try:
+            if os.path.exists(period):
+                with open(period, 'r') as f:
+                    period_value = f.read().strip()
+                    if self.pwm == 1:  # Logger seulement pour le canal 1 (AstraPwm2) pour debug
+                        print(f"[DEBUG set_periode_us] pwmchip{self.chip} canal {self.pwm}: period={period_value}ns (écrit={per}ns), echo_result={result}")
+        except Exception as e:
+            if self.pwm == 1:
+                print(f"[DEBUG set_periode_us] Erreur lors de la vérification: {e}")
+        return result
 
     def set_periode_ms(self,per):
         per *= 1000 # now in.. whatever
-        self.set_periode_us(per)
+        return self.set_periode_us(per)
 
     def set_frequency(self,hz):
         per = (1 / float(hz))
