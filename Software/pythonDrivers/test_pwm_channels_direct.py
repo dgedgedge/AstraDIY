@@ -83,6 +83,7 @@ def main():
         (0, 0x49, 18, "Canal 0 -> GPIO 18 -> INA 0x49"),
         (1, 0x4d, 13, "Canal 1 -> GPIO 13 -> INA 0x4d"),
         (2, 0x49, 18, "Canal 2 -> GPIO 18 -> INA 0x49"),
+        (3, 0x49, 18, "Canal 3 -> GPIO 18 -> INA 0x49"),
         (1, 0x49, 18, "Canal 1 -> GPIO 18 -> INA 0x49"),
         (2, 0x4d, 13, "Canal 2 -> GPIO 13 -> INA 0x4d"),
     ]
