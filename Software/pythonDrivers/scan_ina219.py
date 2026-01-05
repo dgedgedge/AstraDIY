@@ -5,7 +5,7 @@ et afficher les valeurs de tension, courant et puissance pour chaque INA détect
 """
 import sys
 import time
-from lib.ina219 import INA219, I2CError
+from lib.ina219 import INA219
 
 def scan_ina219_addresses(busnum=1, shunt_ohms=0.01, max_expected_amps=6):
     """
@@ -83,10 +83,13 @@ def scan_ina219_addresses(busnum=1, shunt_ohms=0.01, max_expected_amps=6):
             else:
                 print("✗ Non détecté")
                 
-        except I2CError as e:
-            print(f"✗ Erreur I2C: {e}")
         except Exception as e:
-            print(f"✗ Erreur: {e}")
+            # Erreur I2C ou autre
+            error_type = type(e).__name__
+            if "I2C" in error_type or "IO" in error_type or "OSError" in error_type:
+                print(f"✗ Erreur I2C: {e}")
+            else:
+                print(f"✗ Erreur: {e}")
     
     return results
 
