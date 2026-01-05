@@ -14,6 +14,26 @@ import json
 from lib.bme280_lib import readBME280All
 import math
 
+def _get_debug_log_path():
+    """Retourne le chemin du fichier de log de debug"""
+    try:
+        import os
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cursor", "debug.log")
+    except:
+        return "/tmp/astradiy_debug.log"
+
+def _write_debug_log(session_id, run_id, hypothesis_id, location, message, data):
+    """Écrit un log de debug"""
+    try:
+        import os
+        import json
+        log_path = _get_debug_log_path()
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a") as f:
+            f.write(json.dumps({"sessionId":session_id,"runId":run_id,"hypothesisId":hypothesis_id,"location":location,"message":message,"data":data,"timestamp":int(time.time()*1000)})+"\n")
+    except Exception as e:
+        print(f"[DEBUG LOG ERROR] {e}")
+
 
 class AstraTempFetcher(threading.Thread):
     ROSEEUNAVAIL=-100
@@ -246,20 +266,13 @@ class AstraPwm():
         if chip_value is None:
             print(f"[DEBUG AstraPwm.__init__] {self.name}: Auto-détection du pwmchip en cours pour le canal {pwm_channel}...")
         # #region agent log
-        import json
-        try:
-            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"A,B,D","location":"AstraPwm.py:__init__","message":"Before SysPWM creation","data":{"name":self.name,"chip_value":chip_value,"pwm_channel":pwm_channel,"piModel":self.piModel},"timestamp":int(time.time()*1000)})+"\n")
-        except: pass
+        _write_debug_log("debug-session", "init", "A,B,D", "AstraPwm.py:__init__", "Before SysPWM creation", {"name":self.name,"chip_value":chip_value,"pwm_channel":pwm_channel,"piModel":self.piModel})
         # #endregion
         self.pwm = SysPWM(chip_value, pwm_channel)
         # Log du pwmchip utilisé (sera affiché par SysPWM si auto-détecté)
         print(f"[DEBUG AstraPwm.__init__] {self.name}: PWM initialisé - pwmchip{self.pwm.chip}, canal {pwm_channel}, ratio={self.ratio}%")
         # #region agent log
-        try:
-            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"A,B,D","location":"AstraPwm.py:__init__","message":"After SysPWM creation","data":{"name":self.name,"detected_chip":self.pwm.chip,"pwm_channel":pwm_channel,"pwmdir":self.pwm.pwmdir},"timestamp":int(time.time()*1000)})+"\n")
-        except: pass
+        _write_debug_log("debug-session", "init", "A,B,D", "AstraPwm.py:__init__", "After SysPWM creation", {"name":self.name,"detected_chip":self.pwm.chip,"pwm_channel":pwm_channel,"pwmdir":self.pwm.pwmdir})
         # #endregion
         if self.pwm.get_periode_ms() > 0:
             self.pwm.set_duty_ms(0)
@@ -429,11 +442,7 @@ class AstraPwm():
         self.ratio=max(0, min(100,int(ratio*10)/10))
         duty=self.period_ms*self.ratio/100.0
         # #region agent log
-        import json
-        try:
-            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"runtime","hypothesisId":"A,B,D,E","location":"AstraPwm.py:set_ratio","message":"Setting PWM ratio","data":{"name":self.name,"pwmchip":self.pwm.chip,"pwm_channel":self.inacaract["pwm"],"old_ratio":old_ratio,"new_ratio":self.ratio,"duty_ms":duty},"timestamp":int(time.time()*1000)})+"\n")
-        except: pass
+        _write_debug_log("debug-session", "runtime", "A,B,D,E", "AstraPwm.py:set_ratio", "Setting PWM ratio", {"name":self.name,"pwmchip":self.pwm.chip,"pwm_channel":self.inacaract["pwm"],"old_ratio":old_ratio,"new_ratio":self.ratio,"duty_ms":duty})
         # #endregion
         self.pwm.set_duty_ms(duty)
         # Log périodique pour debug (toutes les 10 changements significatifs)

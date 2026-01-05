@@ -20,9 +20,27 @@ import time
 # this program; if not, see <http://www.gnu.org/licenses>.
 
 import time
+import os
 
 class SysPWMException(Exception):
     pass
+
+def _get_debug_log_path():
+    """Retourne le chemin du fichier de log de debug"""
+    try:
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".cursor", "debug.log")
+    except:
+        return "/tmp/astradiy_debug.log"
+
+def _write_debug_log(session_id, run_id, hypothesis_id, location, message, data):
+    """Écrit un log de debug"""
+    try:
+        log_path = _get_debug_log_path()
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a") as f:
+            f.write(json.dumps({"sessionId":session_id,"runId":run_id,"hypothesisId":hypothesis_id,"location":location,"message":message,"data":data,"timestamp":int(time.time()*1000)})+"\n")
+    except Exception as e:
+        print(f"[DEBUG LOG ERROR] {e}")
 
 def find_pwmchip_with_channels(min_channels=2):
     """
@@ -64,10 +82,7 @@ class SysPWM(object):
         self.pwmdir="{chippath}/pwm{pwm}".format(chippath=self.chippath, pwm=self.pwm)
         
         # #region agent log
-        try:
-            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"A,B,C,D","location":"syspwm.py:__init__","message":"SysPWM init","data":{"chip":chip,"pwm":pwm,"chippath":self.chippath,"pwmdir":self.pwmdir,"chip_available":self.pwmchip_available(),"export_writable":self.export_writable(),"pwmX_exists":self.pwmX_exists()},"timestamp":int(time.time()*1000)})+"\n")
-        except: pass
+        _write_debug_log("debug-session", "init", "A,B,C,D", "syspwm.py:__init__", "SysPWM init", {"chip":chip,"pwm":pwm,"chippath":self.chippath,"pwmdir":self.pwmdir,"chip_available":self.pwmchip_available(),"export_writable":self.export_writable(),"pwmX_exists":self.pwmX_exists()})
         # #endregion
         
         if not self.pwmchip_available():
@@ -79,10 +94,7 @@ class SysPWM(object):
             self.create_pwmX()
         
         # #region agent log
-        try:
-            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"C","location":"syspwm.py:__init__","message":"After create_pwmX","data":{"pwmX_exists":self.pwmX_exists(),"pwmdir":self.pwmdir},"timestamp":int(time.time()*1000)})+"\n")
-        except: pass
+        _write_debug_log("debug-session", "init", "C", "syspwm.py:__init__", "After create_pwmX", {"pwmX_exists":self.pwmX_exists(),"pwmdir":self.pwmdir})
         # #endregion
         return
 
@@ -121,17 +133,54 @@ class SysPWM(object):
     def create_pwmX(self):
         pwmexport = "{chippath}/export".format(chippath=self.chippath)
         # #region agent log
-        try:
-            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"C","location":"syspwm.py:create_pwmX","message":"Exporting PWM channel","data":{"pwm":self.pwm,"export_path":pwmexport},"timestamp":int(time.time()*1000)})+"\n")
-        except: pass
+        _write_debug_log("debug-session", "init", "C", "syspwm.py:create_pwmX", "Exporting PWM channel", {"pwm":self.pwm,"export_path":pwmexport,"chip":self.chip})
         # #endregion
         result = self.echo(self.pwm,pwmexport)
-        # #region agent log
+        # Lire le GPIO réellement utilisé après export
+        gpio_info = {}
         try:
-            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"C","location":"syspwm.py:create_pwmX","message":"After export","data":{"export_success":result,"pwmX_exists":self.pwmX_exists()},"timestamp":int(time.time()*1000)})+"\n")
-        except: pass
+            if os.path.exists(self.pwmdir):
+                # Lire uevent pour obtenir les informations du périphérique
+                uevent_path = os.path.join(self.pwmdir, "uevent")
+                if os.path.exists(uevent_path):
+                    with open(uevent_path, 'r') as f:
+                        uevent_content = f.read()
+                        gpio_info["uevent"] = uevent_content
+                
+                # Chercher le lien symbolique pour obtenir le chemin du périphérique
+                if os.path.islink(self.pwmdir):
+                    real_path = os.readlink(self.pwmdir)
+                    gpio_info["real_path"] = real_path
+                    # Extraire le numéro de GPIO si possible depuis le chemin
+                    if "gpio" in real_path.lower():
+                        parts = real_path.split("/")
+                        for part in parts:
+                            if "gpio" in part.lower():
+                                gpio_info["gpio_from_path"] = part
+                                break
+                
+                # Lire le fichier device/of_node pour obtenir le GPIO depuis le device tree
+                device_path = os.path.join(self.pwmdir, "device")
+                if os.path.exists(device_path):
+                    if os.path.islink(device_path):
+                        device_real = os.readlink(device_path)
+                        gpio_info["device_path"] = device_real
+                        # Chercher dans le device tree
+                        of_node_path = os.path.join(self.pwmdir, "device", "of_node")
+                        if os.path.exists(of_node_path):
+                            gpio_info["of_node_exists"] = True
+                            # Lire les propriétés du device tree
+                            try:
+                                compatible_path = os.path.join(of_node_path, "compatible")
+                                if os.path.exists(compatible_path):
+                                    with open(compatible_path, 'r') as f:
+                                        gpio_info["compatible"] = f.read().strip()
+                            except:
+                                pass
+        except Exception as e:
+            gpio_info["error"] = str(e)
+        # #region agent log
+        _write_debug_log("debug-session", "init", "A,D", "syspwm.py:create_pwmX", "After export - GPIO mapping", {"export_success":result,"pwmX_exists":self.pwmX_exists(),"pwmdir":self.pwmdir,"chip":self.chip,"pwm":self.pwm,"gpio_info":gpio_info})
         # #endregion
 
     def enable(self,disable=False):
@@ -140,10 +189,7 @@ class SysPWM(object):
         if disable:
             num = 0
         # #region agent log
-        try:
-            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"init","hypothesisId":"C","location":"syspwm.py:enable","message":"Enabling PWM","data":{"pwm":self.pwm,"chip":self.chip,"enable":num,"enable_path":enable},"timestamp":int(time.time()*1000)})+"\n")
-        except: pass
+        _write_debug_log("debug-session", "init", "C", "syspwm.py:enable", "Enabling PWM", {"pwm":self.pwm,"chip":self.chip,"enable":num,"enable_path":enable})
         # #endregion
         self.echo(num,enable)
 
@@ -163,10 +209,7 @@ class SysPWM(object):
         # gpio cmd,    2ms is 200
         microsec = int(milliseconds * 1000)
         # #region agent log
-        try:
-            with open("/Users/apple/Documents/Dev - Projets - hors Herd/AstraDIY/.cursor/debug.log", "a") as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"runtime","hypothesisId":"E","location":"syspwm.py:set_duty_ms","message":"Setting duty cycle","data":{"pwm":self.pwm,"chip":self.chip,"duty_ms":milliseconds,"duty_us":microsec},"timestamp":int(time.time()*1000)})+"\n")
-        except: pass
+        _write_debug_log("debug-session", "runtime", "E", "syspwm.py:set_duty_ms", "Setting duty cycle", {"pwm":self.pwm,"chip":self.chip,"duty_ms":milliseconds,"duty_us":microsec})
         # #endregion
         self.set_duty_us(microsec)
 
