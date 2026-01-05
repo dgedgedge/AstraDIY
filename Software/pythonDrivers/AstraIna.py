@@ -262,21 +262,38 @@ class AstraIna:
             curtimeS=time.perf_counter()
             deltatimeS=curtimeS-self._lasttimeS
             if not self.ina219.current_overflow():
-                self._shuntVoltagemV = max(self.ina219.shunt_voltage(), 0.0)
-                self._voltageV = max(float(self.ina219.voltage()),0.0)
-                self._currentmA = max(float(self.ina219.current()), 0.0)
-                self._powermW = max(float(self.ina219.power()),0.0)
+                # Lire les valeurs brutes AVANT le max(..., 0.0) pour voir les valeurs négatives potentielles
+                raw_shunt_mV = self.ina219.shunt_voltage()
+                raw_voltage_V = float(self.ina219.voltage())
+                raw_current_mA = float(self.ina219.current())
+                raw_power_mW = float(self.ina219.power())
+                
+                self._shuntVoltagemV = max(raw_shunt_mV, 0.0)
+                self._voltageV = max(raw_voltage_V, 0.0)
+                self._currentmA = max(raw_current_mA, 0.0)
+                self._powermW = max(raw_power_mW, 0.0)
+                
+                # Debug détaillé pour les PWM (toutes les 25 lectures environ)
+                if "Pwm" in self.name:
+                    if not hasattr(self, '_debug_counter'):
+                        self._debug_counter = 0
+                    self._debug_counter += 1
+                    if self._debug_counter % 25 == 0:
+                        print(f"[DEBUG getDataFromIna] {self.name}: RAW - shunt={raw_shunt_mV:.3f}mV, V={raw_voltage_V:.3f}V, I={raw_current_mA:.3f}mA, P={raw_power_mW:.3f}mW")
+                        print(f"[DEBUG getDataFromIna] {self.name}: AFTER max(0) - shunt={self._shuntVoltagemV:.3f}mV, V={self._voltageV:.3f}V, I={self._currentmA:.3f}mA, P={self._powermW:.3f}mW, overflow={self.ina219.current_overflow()}")
+            else:
+                # Logger si overflow
+                if "Pwm" in self.name:
+                    if not hasattr(self, '_overflow_counter'):
+                        self._overflow_counter = 0
+                    self._overflow_counter += 1
+                    if self._overflow_counter % 10 == 0:
+                        print(f"[DEBUG getDataFromIna] {self.name}: CURRENT OVERFLOW détecté")
             energiemWS=self._powermW * deltatimeS
             self._energiemWS += energiemWS
             self._lasttimeS=curtimeS
             self._intPeriodS=curtimeS-self.firstttime
             self.pingOk = True
-            # Debug périodique pour les PWM (toutes les 50 lectures environ)
-            if not hasattr(self, '_debug_counter'):
-                self._debug_counter = 0
-            self._debug_counter += 1
-            if "Pwm" in self.name and self._debug_counter % 50 == 0:
-                print(f"[DEBUG getDataFromIna] {self.name}: V={self._voltageV:.2f}V, A={self._currentmA/1000:.3f}A, W={self._powermW/1000:.2f}W, pingOK={self.pingOk}, configSend={self.configurationSend}")
         except (OSError, IOError) as e:
             # Erreur I2C - le capteur peut être temporairement indisponible
             self.pingOk = False
