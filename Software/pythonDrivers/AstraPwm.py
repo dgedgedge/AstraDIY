@@ -234,7 +234,8 @@ class AstraPwm():
     TEMPUNAVAIL=AstraTempFetcher.TEMPUNAVAIL
     astraGpioSet = { 
                 "AstraPwm1": {
-                    "pi5": { "chip":None, "pwm":3 },  # À tester : Canal 3 pour GPIO 18 (INA 0x49)
+                    "pi5": { "chip":None, "pwm":1 },  # PROBLÈME: Aucun canal ne fonctionne pour GPIO 18 (INA 0x49)
+                    # Vérifier l'overlay pwm-2chan et le câblage matériel
                     "pi4": { "chip":0, "pwm":0 },
                               },
                 "AstraPwm2": {
