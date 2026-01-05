@@ -170,7 +170,8 @@ if __name__ == "__main__":
     #pwm0 is GPIO pin 18 is physical pin 12
     
     # OK 18, 13
-    pwm = SysPWM(2,1)
+    # Utiliser auto-détection pour compatibilité kernel 6.12+
+    pwm = SysPWM(None, 1)
     #if pwm.get_periode_ms() != 0:
     pwm.set_duty_ms(0)
     pwm.set_periode_ms(periode1)
@@ -178,7 +179,7 @@ if __name__ == "__main__":
     atexit.register(pwm.disable)
     pwm.enable()
 
-    pwm1 = SysPWM(2,2)
+    pwm1 = SysPWM(None, 2)
     #if pwm1.get_periode_ms() != 0:
     pwm1.set_duty_ms(0)
     pwm1.set_periode_ms(periode2)

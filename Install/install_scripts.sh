@@ -39,7 +39,8 @@ do
 	fi
 done
 # Copier les autres fichiers spécifiques
-for FILE in ina219.py syspwm.py bme280_lib.py survDateOffset.py
+# Note: ina219.py, syspwm.py et bme280_lib.py sont maintenant dans lib/ et seront copiés avec le répertoire lib/
+for FILE in survDateOffset.py
 do
 	if [ -f ${PYTHONDRIVERSDIR}/${FILE} ]; then
 		cp ${PYTHONDRIVERSDIR}/${FILE} $INSTALLDIR
@@ -93,7 +94,7 @@ fi
 # Vérifier les fichiers Python principaux
 echo ""
 echo "Vérification des fichiers Python..."
-EXPECTED_FILES="AstraGpioHmi.py AstraPwmHmi.py AstraInaHmi.py AstraGpsHmi.py AstraDIYHmi.py ina219.py syspwm.py bme280_lib.py survDateOffset.py"
+EXPECTED_FILES="AstraGpioHmi.py AstraPwmHmi.py AstraInaHmi.py AstraGpsHmi.py AstraDIYHmi.py survDateOffset.py"
 for FILE in $EXPECTED_FILES
 do
 	if [ -f "$INSTALLDIR/$FILE" ]; then

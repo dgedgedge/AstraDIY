@@ -11,6 +11,6 @@ echo "========Chrony offsets==========="
 ./survDateOffset.py
 echo
 echo "========bme280==========="
-./bme280_lib.py
+python3 -c "from lib.bme280_lib import readBME280All; temp, press, hum = readBME280All(); print(f'Temp: {temp:.2f}°C, Press: {press:.2f}hPa, Hum: {hum:.2f}%')"
 echo "========================="
 
