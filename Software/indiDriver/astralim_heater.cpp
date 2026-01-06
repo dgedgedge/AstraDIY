@@ -123,15 +123,8 @@ bool AstrAlimHeater::initProperties()
     Heater2SensorAssignSP.fill(getDeviceName(), "HEATER2_SENSOR_ASSIGN", "Heater 2 Sensor Assignment", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
     
     // ===== Available Sensors =====
-    // Initialiser avec des slots vides, seront remplis dynamiquement
-    // Les noms seront mis à jour dans updateSensorStatusList()
-    for (int i = 0; i < 10; i++)
-    {
-        char name[32];
-        snprintf(name, sizeof(name), "SENSOR_%d", i);
-        AvailableSensorsSP[i].fill(name, "", ISS_OFF);
-    }
-    AvailableSensorsSP.fill(getDeviceName(), "AVAILABLE_SENSORS", "Available Sensors", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+    // Ne pas initialiser ici - sera créé dynamiquement dans updateSensorStatusList()
+    // La propriété sera définie après le scan des capteurs dans Connect()
     
     // ===== Sensor Assignment Actions =====
     SensorAssignActionSP[ASSIGN_TO_HEATER1].fill("ASSIGN_TO_H1", "Assign to Heater 1", ISS_OFF);
@@ -201,7 +194,11 @@ bool AstrAlimHeater::updateProperties()
         defineProperty(Heater2ModeSP);
         defineProperty(Heater2SensorTP);
         defineProperty(Heater2SensorAssignSP);
-        defineProperty(AvailableSensorsSP);
+        // AvailableSensorsSP sera défini dynamiquement après le scan
+        if (AvailableSensorsSP.count() > 0)
+        {
+            defineProperty(AvailableSensorsSP);
+        }
         defineProperty(SensorAssignActionSP);
         defineProperty(PIDNP);
         defineProperty(DewDeltaNP);
@@ -228,7 +225,10 @@ bool AstrAlimHeater::updateProperties()
         deleteProperty(Heater2ModeSP);
         deleteProperty(Heater2SensorTP);
         deleteProperty(Heater2SensorAssignSP);
-        deleteProperty(AvailableSensorsSP);
+        if (AvailableSensorsSP.count() > 0)
+        {
+            deleteProperty(AvailableSensorsSP);
+        }
         deleteProperty(SensorAssignActionSP);
         deleteProperty(PIDNP);
         deleteProperty(DewDeltaNP);
@@ -1668,23 +1668,67 @@ void AstrAlimHeater::updateSensorStatusList()
     // Re-scan pour détecter les nouveaux capteurs
     availableDS18B20 = scanDS18B20Devices();
     
-    // Sauvegarder quel capteur est actuellement sélectionné
+    // Limiter à 10 capteurs maximum
+    size_t sensorCount = availableDS18B20.size();
+    if (sensorCount > 10) sensorCount = 10;
+    
+    // Sauvegarder quel capteur est actuellement sélectionné (si la propriété existe déjà)
     std::string selectedSensorId;
-    for (int i = 0; i < 10 && i < static_cast<int>(availableDS18B20.size()); i++)
+    if (AvailableSensorsSP.count() > 0)
     {
-        if (AvailableSensorsSP[i].getState() == ISS_ON)
+        for (size_t i = 0; i < AvailableSensorsSP.count() && i < availableDS18B20.size(); i++)
         {
-            selectedSensorId = availableDS18B20[i];
-            break;
+            if (AvailableSensorsSP[i].getState() == ISS_ON)
+            {
+                selectedSensorId = availableDS18B20[i];
+                break;
+            }
+        }
+    }
+    
+    // Vérifier si le nombre de capteurs a changé
+    bool needRedefine = (AvailableSensorsSP.count() != sensorCount);
+    
+    // Si besoin, supprimer et recréer la propriété avec le bon nombre d'éléments
+    if (needRedefine && isConnected())
+    {
+        if (AvailableSensorsSP.count() > 0)
+        {
+            deleteProperty(AvailableSensorsSP);
+        }
+        
+        // Recréer la propriété avec le bon nombre d'éléments
+        AvailableSensorsSP.resize(sensorCount);
+        for (size_t i = 0; i < sensorCount; i++)
+        {
+            char name[32];
+            snprintf(name, sizeof(name), "SENSOR_%zu", i);
+            AvailableSensorsSP[i].fill(name, "", ISS_OFF);
+        }
+        AvailableSensorsSP.fill(getDeviceName(), "AVAILABLE_SENSORS", "Available Sensors", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+        defineProperty(AvailableSensorsSP);
+    }
+    else if (AvailableSensorsSP.count() == 0 && sensorCount > 0)
+    {
+        // Première création
+        AvailableSensorsSP.resize(sensorCount);
+        for (size_t i = 0; i < sensorCount; i++)
+        {
+            char name[32];
+            snprintf(name, sizeof(name), "SENSOR_%zu", i);
+            AvailableSensorsSP[i].fill(name, "", ISS_OFF);
+        }
+        AvailableSensorsSP.fill(getDeviceName(), "AVAILABLE_SENSORS", "Available Sensors", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+        if (isConnected())
+        {
+            defineProperty(AvailableSensorsSP);
         }
     }
     
     // Mettre à jour la liste avec les capteurs disponibles
-    int sensorCount = 0;
-    for (const auto& sensorId : availableDS18B20)
+    for (size_t i = 0; i < sensorCount; i++)
     {
-        if (sensorCount >= 10) break;  // Limite de 10 capteurs
-        
+        const std::string& sensorId = availableDS18B20[i];
         double temp = readDS18B20Temperature(sensorId);
         std::string label;
         
@@ -1732,18 +1776,8 @@ void AstrAlimHeater::updateSensorStatusList()
         
         // Mettre à jour le switch avec fill() pour définir le label
         char name[32];
-        snprintf(name, sizeof(name), "SENSOR_%d", sensorCount);
-        AvailableSensorsSP[sensorCount].fill(name, label.c_str(), state);
-        
-        sensorCount++;
-    }
-    
-    // Désactiver les slots non utilisés en les remplissant avec des labels vides
-    for (int i = sensorCount; i < 10; i++)
-    {
-        char name[32];
-        snprintf(name, sizeof(name), "SENSOR_%d", i);
-        AvailableSensorsSP[i].fill(name, "", ISS_OFF);
+        snprintf(name, sizeof(name), "SENSOR_%zu", i);
+        AvailableSensorsSP[i].fill(name, label.c_str(), state);
     }
     
     AvailableSensorsSP.setState(IPS_OK);
