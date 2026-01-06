@@ -496,15 +496,30 @@ class DrewControl(QWidget):
     def update_text_fields(self):
         if self.buttonAsservOn:
             r = self.AstraDrew.get_ratio(); self.p_slider.setValue(int(r)); self.p_val.setText(f"{int(r)}%")
+        
+        cmd = None
         if self.buttonRoseeConsigneOn:
             cmd = self.AstraDrew.get_cmdTemp()
             if cmd > -50: self.c_slider.setValue(int(cmd*10)); self.c_val.setText(f"{cmd:.1f}°C")
         t = self.AstraDrew.get_temp()
         self.lbl_temp.setText(f"{t:.1f}°" if t != self.AstraDrew.TEMPUNAVAIL else "NC")
-        self.lbl_amb.setText(f"{self.AstraDrew.get_bmeTemp():.1f}°")
-        self.lbl_hum.setText(f"{self.AstraDrew.get_bmeHumidity():.0f}%")
+        
+        # Récupérer les valeurs pour affichage et logging
+        amb_temp = self.AstraDrew.get_bmeTemp()
+        amb_hum = self.AstraDrew.get_bmeHumidity()
         dew = self.AstraDrew.get_bmeTempRosee()
+        
+        self.lbl_amb.setText(f"{amb_temp:.1f}°")
+        self.lbl_hum.setText(f"{amb_hum:.0f}%")
         self.lbl_dew.setText(f"{dew:.1f}°" if dew != self.AstraDrew.ROSEEUNAVAIL else "--")
+        
+        # Log des valeurs affichées dans l'interface (si mode auto)
+        if self.buttonRoseeConsigneOn and cmd is not None:
+            print(f"[HMI] {self.name}: "
+                  f"Affichage - Temp_ambiante={amb_temp:.1f}°C | "
+                  f"Humidité={amb_hum:.0f}% | "
+                  f"Point_rosée={dew:.1f}°C | "
+                  f"Consigne={cmd:.1f}°C")
 
 
 class MainPwmWindow(QWidget):

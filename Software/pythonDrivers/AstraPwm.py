@@ -382,7 +382,7 @@ class AstraPwm():
 
         # Aserv
         self.thread=None
-        self.autoUpdateKpKiKd=True
+        self.autoUpdateKpKiKd=False  # Par défaut OFF au premier lancement
         self.Kp = 2
         self.Ki = 0.0
         self.Kd = 0.0
@@ -429,18 +429,35 @@ class AstraPwm():
 
     def updateCmdTempfromTempRosee(self):
         if self.asservTempRosee: 
+            # Récupérer les valeurs brutes et filtrées pour le logging
+            temp_brute = self.AstraTempFetcher.bme_temperature
+            temp_filtree = self.AstraTempFetcher.filteredTemp
+            hum_brute = self.AstraTempFetcher.bme_humidity
+            hum_filtree = self.AstraTempFetcher.filteredHumidity
+            rosee_brute = self.get_bmeTempRosee()
+            rosee_filtree = self.AstraTempFetcher.filteredDewPoint
+            
             # Utiliser le point de rosée filtré pour éviter les variations
-            tempRosee = self.AstraTempFetcher.filteredDewPoint
+            tempRosee = rosee_filtree
             
             # Si le filtre n'est pas encore initialisé, utiliser la valeur brute
             if tempRosee == self.ROSEEUNAVAIL or tempRosee == self.TEMPUNAVAIL:
-                tempRosee = self.get_bmeTempRosee()
+                tempRosee = rosee_brute
             
             # Vérifier si le point de rosée est disponible
             if tempRosee != self.ROSEEUNAVAIL and tempRosee != self.TEMPUNAVAIL:
                 cmdTemp = tempRosee + self.deltaTempRosee
+                cmdTemp_avant_arrondi = cmdTemp
                 # Arrondir la consigne à 0.1°C près pour éviter les variations d'affichage
                 self.cmdTemp = round(cmdTemp * 10.0) / 10.0
+                
+                # Log détaillé des valeurs qui déterminent la consigne
+                print(f"[CONSIGNE] {self.name}: "
+                      f"Temp(brute={temp_brute:.3f}°C, filtrée={temp_filtree:.3f}°C) | "
+                      f"Hum(brute={hum_brute:.2f}%, filtrée={hum_filtree:.2f}%) | "
+                      f"Rosée(brute={rosee_brute:.3f}°C, filtrée={rosee_filtree:.3f}°C) | "
+                      f"Delta={self.deltaTempRosee:.1f}°C | "
+                      f"Consigne(avant_arrondi={cmdTemp_avant_arrondi:.3f}°C, après_arrondi={self.cmdTemp:.1f}°C)")
             # Si le point de rosée n'est pas disponible, garder la consigne actuelle
             # (ne pas la modifier pour éviter d'afficher -98°C)
 
@@ -627,6 +644,12 @@ class AstraPwm():
                 self.Kp = variables_dict["Kp"]
                 self.Ki = variables_dict["Ki"]
                 self.Kd = variables_dict["Kd"]
+            # Charger l'état de l'auto-calcul PID (par défaut False si absent)
+            if "autoUpdateKpKiKd" in variables_dict:
+                self.autoUpdateKpKiKd = variables_dict["autoUpdateKpKiKd"]
+            else:
+                # Si absent, utiliser la valeur par défaut (False)
+                self.autoUpdateKpKiKd = False
             if "tempname" in variables_dict:
                 saved_tempname = variables_dict["tempname"]
                 print(f"[DEBUG AstraPwm.load] {self.name}: tempname trouvé dans sauvegarde = '{saved_tempname}', tempname actuel = '{self.tempname}'")
@@ -695,6 +718,7 @@ class AstraPwm():
                 "Kp":self.Kp,
                 "Ki":self.Ki,
                 "Kd":self.Kd,
+                "autoUpdateKpKiKd":self.autoUpdateKpKiKd,
                 }
         chemin_complet=Path.home() / ".AstrAlim"
         chemin_complet.mkdir(parents=True, exist_ok=True)
