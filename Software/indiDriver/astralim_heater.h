@@ -59,6 +59,7 @@ private:
     bool autoDetectSensor(int heaterChannel);
     void handleAutoDetect(int heaterChannel);
     bool testSensorResponse(int heaterChannel, const std::string& sensorId);
+    double filterDewPoint(double newDewPoint);  // Filtre passe-bas pour le point de rosée
     
     // Power monitoring
     void readINA219();
@@ -85,6 +86,11 @@ private:
     // DS18B20 sensor paths
     std::string ds18b20Path[2];
     std::vector<std::string> availableDS18B20;
+    
+    // Dew point filtering (moving average)
+    static constexpr int DEW_POINT_FILTER_SIZE = 5;  // Nombre de valeurs pour la moyenne mobile
+    std::vector<double> dewPointHistory;  // Historique des points de rosée
+    double filteredDewPoint;  // Point de rosée filtré
     
     // Sensor assignment state
     struct SensorAssignState {

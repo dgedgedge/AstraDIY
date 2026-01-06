@@ -39,6 +39,10 @@ AstrAlimHeater::AstrAlimHeater()
             sensorAssignState[i].testStartTemp[j] = TEMP_UNAVAILABLE;
         }
     }
+    
+    // Initialiser le filtre du point de rosée
+    filteredDewPoint = DEWPOINT_UNAVAILABLE;
+    dewPointHistory.clear();
 }
 
 AstrAlimHeater::~AstrAlimHeater()
@@ -368,7 +372,15 @@ void AstrAlimHeater::TimerHit()
         else if (modeSP[MODE_AUTO].getState() == ISS_ON)
         {
             // Auto mode - PID control based on dew point
-            double dewPoint = AmbientNP[AMB_DEWPOINT].getValue();
+            // Utiliser le point de rosée filtré pour éviter les variations
+            double dewPoint = filteredDewPoint;
+            
+            // Si le filtre n'est pas encore initialisé, utiliser la valeur brute
+            if (dewPoint <= DEWPOINT_UNAVAILABLE + 10)
+            {
+                dewPoint = AmbientNP[AMB_DEWPOINT].getValue();
+            }
+            
             double targetTemp;
             
             if (dewPoint > DEWPOINT_UNAVAILABLE + 10)
@@ -765,10 +777,17 @@ bool AstrAlimHeater::readBME280()
         if (humidity > 0)
         {
             double dewPoint = calculateDewPoint(temp, humidity);
-            AmbientNP[AMB_DEWPOINT].setValue(dewPoint);
+            
+            // Filtrer le point de rosée avec une moyenne mobile
+            filteredDewPoint = filterDewPoint(dewPoint);
+            
+            AmbientNP[AMB_DEWPOINT].setValue(filteredDewPoint);
         }
         else
         {
+            // Réinitialiser le filtre si pas d'humidité
+            dewPointHistory.clear();
+            filteredDewPoint = DEWPOINT_UNAVAILABLE;
             AmbientNP[AMB_DEWPOINT].setValue(DEWPOINT_UNAVAILABLE);
         }
         
@@ -794,6 +813,34 @@ double AstrAlimHeater::calculateDewPoint(double temp, double humidity)
     double dewPoint = (b * alpha) / (a - alpha);
     
     return dewPoint;
+}
+
+double AstrAlimHeater::filterDewPoint(double newDewPoint)
+{
+    // Ajouter la nouvelle valeur à l'historique
+    dewPointHistory.push_back(newDewPoint);
+    
+    // Limiter la taille de l'historique
+    if (dewPointHistory.size() > DEW_POINT_FILTER_SIZE)
+    {
+        dewPointHistory.erase(dewPointHistory.begin());
+    }
+    
+    // Si on n'a pas assez de valeurs, retourner la valeur actuelle
+    if (dewPointHistory.size() < 2)
+    {
+        return newDewPoint;
+    }
+    
+    // Calculer la moyenne mobile
+    double sum = 0.0;
+    for (double value : dewPointHistory)
+    {
+        sum += value;
+    }
+    double average = sum / dewPointHistory.size();
+    
+    return average;
 }
 
 // ==================== PID Control ====================
