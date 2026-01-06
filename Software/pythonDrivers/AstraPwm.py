@@ -582,11 +582,16 @@ class AstraPwm():
         learning_rate = 0.00001
         lastpid_output=0
 
+        # Mettre à jour la consigne depuis le point de rosée AVANT de calculer l'erreur initiale
+        self.updateCmdTempfromTempRosee()
+        
         error = self.get_cmdTemp() - self.get_temp()
         integralNbVal = 10
-        integral = error * integralNbVal  # Valeur initiale de l'intégrale glissante
-        integralList = [error] * integralNbVal
-        prev_error = 0.0
+        # Initialiser l'intégrale à 0 pour éviter un pic au démarrage
+        # Elle se remplira progressivement avec les vraies valeurs d'erreur
+        integral = 0.0
+        integralList = [0.0] * integralNbVal
+        prev_error = error  # Initialiser prev_error avec l'erreur actuelle pour éviter un pic dérivé
 
         while self._running:
             self.updateCmdTempfromTempRosee()
@@ -612,7 +617,8 @@ class AstraPwm():
                 self.Kd = max(0, min(self.Kd, 100))
 
             pid_output = max(0, min(pid_output, 100))
-            #print("cmd=", self.get_cmdTemp(), "Temp=", self.get_temp(), f"pid={pid_output:.2f}   Kp={self.Kp:.3f} Ki={self.Ki:.3f} Kd={self.Kd:.3f} int:{integral:.1f}")
+            # Log PID pour debug
+            print(f"[PID] {self.name}: cmd={self.get_cmdTemp():.1f}°C, temp={self.get_temp():.1f}°C, error={error:.2f}°C, pid={pid_output:.1f}%, Kp={self.Kp:.3f}, Ki={self.Ki:.3f}, Kd={self.Kd:.3f}, integral={integral:.1f}")
             self.set_ratio(pid_output)
             time.sleep(step_time)
         self.set_ratio(0)
