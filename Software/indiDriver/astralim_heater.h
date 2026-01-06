@@ -19,6 +19,7 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <chrono>
 
 class AstrAlimHeater : public INDI::DefaultDevice
 {
@@ -52,6 +53,12 @@ private:
     bool readBME280();
     double calculateDewPoint(double temp, double humidity);
     std::vector<std::string> scanDS18B20Devices();
+    double readDS18B20Temperature(const std::string& sensorId);
+    void updateSensorStatusList();
+    void validateAssignedSensors();
+    bool autoDetectSensor(int heaterChannel);
+    void handleAutoDetect(int heaterChannel);
+    bool testSensorResponse(int heaterChannel, const std::string& sensorId);
     
     // Power monitoring
     void readINA219();
@@ -78,6 +85,26 @@ private:
     // DS18B20 sensor paths
     std::string ds18b20Path[2];
     std::vector<std::string> availableDS18B20;
+    
+    // Sensor assignment state
+    struct SensorAssignState {
+        bool autoDetectActive;                    // Test de détection automatique en cours
+        std::chrono::steady_clock::time_point testStartTime;
+        double testStartTemp[10];                  // Températures de départ pour chaque capteur testé
+        int testPower;                             // Puissance utilisée pour le test
+    };
+    SensorAssignState sensorAssignState[2];
+
+    // Safety monitoring for heater response
+    struct HeaterSafetyState {
+        double referencePower;        // Puissance de référence au début du test
+        double referenceTemp;        // Température de référence au début du test
+        std::chrono::steady_clock::time_point testStartTime;  // Début du test
+        bool testActive;              // Un test de sécurité est en cours
+        bool faultDetected;           // Un problème a été détecté
+        double minTempIncrease;       // Augmentation minimale attendue (°C)
+    };
+    HeaterSafetyState safetyState[2];  // Un pour chaque heater
 
     //========== Properties ==========
     
@@ -95,6 +122,8 @@ private:
     INDI::PropertySwitch Heater1ModeSP {3};      // Off / Manual / Auto
     enum { MODE_OFF, MODE_MANUAL, MODE_AUTO };
     INDI::PropertyText Heater1SensorTP {1};      // Associated DS18B20 sensor ID
+    INDI::PropertySwitch Heater1SensorAssignSP {3};  // Auto-Detect / Test / Clear
+    enum { SENSOR_ASSIGN_AUTO, SENSOR_ASSIGN_TEST, SENSOR_ASSIGN_CLEAR };
     
     // Heater 2 properties
     INDI::PropertyNumber Heater2TempNP {1};
@@ -102,9 +131,10 @@ private:
     INDI::PropertyNumber Heater2SetpointNP {1};
     INDI::PropertySwitch Heater2ModeSP {3};
     INDI::PropertyText Heater2SensorTP {1};
+    INDI::PropertySwitch Heater2SensorAssignSP {3};  // Auto-Detect / Test / Clear
     
-    // Available sensors list
-    INDI::PropertyText AvailableSensorsTP {1};
+    // Available sensors list with status
+    INDI::PropertyText AvailableSensorsTP {1};  // Liste formatée multiligne avec statuts
     
     // PID parameters (shared)
     INDI::PropertyNumber PIDNP {3};
@@ -116,6 +146,15 @@ private:
     // Power monitoring (if INA219 available)
     INDI::PropertyNumber PowerMonitorNP {4};
     enum { PWR_VOLTAGE1, PWR_CURRENT1, PWR_VOLTAGE2, PWR_CURRENT2 };
+    
+    // Safety monitoring (optional)
+    INDI::PropertySwitch Heater1SafetySP {2};  // Enable / Disable
+    enum { SAFETY_ENABLE, SAFETY_DISABLE };
+    INDI::PropertySwitch Heater2SafetySP {2};
+    INDI::PropertySwitch Heater1SafetyResetSP {1};  // Reset fault state
+    INDI::PropertySwitch Heater2SafetyResetSP {1};
+    INDI::PropertyNumber SafetyParamsNP {3};  // Configurable parameters
+    enum { SAFETY_POWER_INCREASE, SAFETY_TEST_DURATION, SAFETY_MIN_TEMP_INCREASE };
 
     // Constants
     static constexpr int POLL_INTERVAL_MS = 5000;
@@ -125,6 +164,11 @@ private:
     static constexpr double DEFAULT_DEW_DELTA = 2.0;
     static constexpr double TEMP_UNAVAILABLE = 100.0;
     static constexpr double DEWPOINT_UNAVAILABLE = -100.0;
+    
+    // Safety constants (defaults, can be configured)
+    static constexpr double DEFAULT_SAFETY_POWER_INCREASE = 10.0;  // 10% d'augmentation
+    static constexpr int DEFAULT_SAFETY_TEST_DURATION_SEC = 300;   // 5 minutes
+    static constexpr double DEFAULT_SAFETY_MIN_TEMP_INCREASE = 0.5; // 0.5°C minimum attendu
 };
 
 #endif // ASTRALIM_HEATER_H

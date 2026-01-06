@@ -28,6 +28,17 @@ AstrAlimHeater::AstrAlimHeater()
     setVersion(INDI_ASTRALIM_VERSION_MAJOR, INDI_ASTRALIM_VERSION_MINOR);
     pidRunning[0] = false;
     pidRunning[1] = false;
+    
+    // Initialiser les états d'assignation
+    for (int i = 0; i < 2; i++)
+    {
+        sensorAssignState[i].autoDetectActive = false;
+        sensorAssignState[i].testPower = 50;  // 50% par défaut pour le test
+        for (int j = 0; j < 10; j++)
+        {
+            sensorAssignState[i].testStartTemp[j] = TEMP_UNAVAILABLE;
+        }
+    }
 }
 
 AstrAlimHeater::~AstrAlimHeater()
@@ -79,6 +90,11 @@ bool AstrAlimHeater::initProperties()
     Heater1SensorTP[0].fill("HEATER1_SENSOR_ID", "Sensor ID", "");
     Heater1SensorTP.fill(getDeviceName(), "HEATER1_SENSOR", "Heater 1 Sensor", OPTIONS_TAB, IP_RW, 60, IPS_IDLE);
     
+    Heater1SensorAssignSP[SENSOR_ASSIGN_AUTO].fill("HEATER1_SENSOR_AUTO", "Auto-Detect", ISS_OFF);
+    Heater1SensorAssignSP[SENSOR_ASSIGN_TEST].fill("HEATER1_SENSOR_TEST", "Test Response", ISS_OFF);
+    Heater1SensorAssignSP[SENSOR_ASSIGN_CLEAR].fill("HEATER1_SENSOR_CLEAR", "Clear", ISS_OFF);
+    Heater1SensorAssignSP.fill(getDeviceName(), "HEATER1_SENSOR_ASSIGN", "Heater 1 Sensor Assignment", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+    
     // ===== Heater 2 =====
     Heater2TempNP[0].fill("HEATER2_TEMP", "Temperature (°C)", "%.1f", -40, 125, 0.1, TEMP_UNAVAILABLE);
     Heater2TempNP.fill(getDeviceName(), "HEATER2_TEMPERATURE", "Heater 2 Temp", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
@@ -97,7 +113,13 @@ bool AstrAlimHeater::initProperties()
     Heater2SensorTP[0].fill("HEATER2_SENSOR_ID", "Sensor ID", "");
     Heater2SensorTP.fill(getDeviceName(), "HEATER2_SENSOR", "Heater 2 Sensor", OPTIONS_TAB, IP_RW, 60, IPS_IDLE);
     
+    Heater2SensorAssignSP[SENSOR_ASSIGN_AUTO].fill("HEATER2_SENSOR_AUTO", "Auto-Detect", ISS_OFF);
+    Heater2SensorAssignSP[SENSOR_ASSIGN_TEST].fill("HEATER2_SENSOR_TEST", "Test Response", ISS_OFF);
+    Heater2SensorAssignSP[SENSOR_ASSIGN_CLEAR].fill("HEATER2_SENSOR_CLEAR", "Clear", ISS_OFF);
+    Heater2SensorAssignSP.fill(getDeviceName(), "HEATER2_SENSOR_ASSIGN", "Heater 2 Sensor Assignment", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+    
     // ===== Available Sensors =====
+    // Utiliser une seule propriété Text avec liste multiligne
     AvailableSensorsTP[0].fill("SENSORS_LIST", "DS18B20 Sensors", "Scanning...");
     AvailableSensorsTP.fill(getDeviceName(), "AVAILABLE_SENSORS", "Available Sensors", OPTIONS_TAB, IP_RO, 60, IPS_IDLE);
     
@@ -118,6 +140,26 @@ bool AstrAlimHeater::initProperties()
     PowerMonitorNP[PWR_CURRENT2].fill("CURRENT2", "Heater 2 (A)", "%.2f", 0, 6, 0, 0);
     PowerMonitorNP.fill(getDeviceName(), "POWER_MONITOR", "Power Monitor", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
     
+    // ===== Safety Monitoring =====
+    Heater1SafetySP[SAFETY_ENABLE].fill("HEATER1_SAFETY_ENABLE", "Enable", ISS_OFF);
+    Heater1SafetySP[SAFETY_DISABLE].fill("HEATER1_SAFETY_DISABLE", "Disable", ISS_ON);
+    Heater1SafetySP.fill(getDeviceName(), "HEATER1_SAFETY", "Heater 1 Safety", OPTIONS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+    
+    Heater2SafetySP[SAFETY_ENABLE].fill("HEATER2_SAFETY_ENABLE", "Enable", ISS_OFF);
+    Heater2SafetySP[SAFETY_DISABLE].fill("HEATER2_SAFETY_DISABLE", "Disable", ISS_ON);
+    Heater2SafetySP.fill(getDeviceName(), "HEATER2_SAFETY", "Heater 2 Safety", OPTIONS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+    
+    Heater1SafetyResetSP[0].fill("HEATER1_SAFETY_RESET", "Reset Fault", ISS_OFF);
+    Heater1SafetyResetSP.fill(getDeviceName(), "HEATER1_SAFETY_RESET", "Heater 1 Safety Reset", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+    
+    Heater2SafetyResetSP[0].fill("HEATER2_SAFETY_RESET", "Reset Fault", ISS_OFF);
+    Heater2SafetyResetSP.fill(getDeviceName(), "HEATER2_SAFETY_RESET", "Heater 2 Safety Reset", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+    
+    SafetyParamsNP[SAFETY_POWER_INCREASE].fill("SAFETY_POWER_INCREASE", "Power Increase Threshold (%)", "%.1f", 5, 50, 1, DEFAULT_SAFETY_POWER_INCREASE);
+    SafetyParamsNP[SAFETY_TEST_DURATION].fill("SAFETY_TEST_DURATION", "Test Duration (min)", "%.0f", 1, 30, 1, DEFAULT_SAFETY_TEST_DURATION_SEC / 60.0);
+    SafetyParamsNP[SAFETY_MIN_TEMP_INCREASE].fill("SAFETY_MIN_TEMP_INCREASE", "Min Temp Increase (°C)", "%.2f", 0.1, 5, 0.1, DEFAULT_SAFETY_MIN_TEMP_INCREASE);
+    SafetyParamsNP.fill(getDeviceName(), "SAFETY_PARAMS", "Safety Parameters", OPTIONS_TAB, IP_RW, 60, IPS_IDLE);
+    
     addDebugControl();
     setDefaultPollingPeriod(POLL_INTERVAL_MS);
     
@@ -137,15 +179,22 @@ bool AstrAlimHeater::updateProperties()
         defineProperty(Heater1SetpointNP);
         defineProperty(Heater1ModeSP);
         defineProperty(Heater1SensorTP);
+        defineProperty(Heater1SensorAssignSP);
         defineProperty(Heater2TempNP);
         defineProperty(Heater2PowerNP);
         defineProperty(Heater2SetpointNP);
         defineProperty(Heater2ModeSP);
         defineProperty(Heater2SensorTP);
+        defineProperty(Heater2SensorAssignSP);
         defineProperty(AvailableSensorsTP);
         defineProperty(PIDNP);
         defineProperty(DewDeltaNP);
         defineProperty(PowerMonitorNP);
+        defineProperty(Heater1SafetySP);
+        defineProperty(Heater2SafetySP);
+        defineProperty(Heater1SafetyResetSP);
+        defineProperty(Heater2SafetyResetSP);
+        defineProperty(SafetyParamsNP);
     }
     else
     {
@@ -156,15 +205,22 @@ bool AstrAlimHeater::updateProperties()
         deleteProperty(Heater1SetpointNP);
         deleteProperty(Heater1ModeSP);
         deleteProperty(Heater1SensorTP);
+        deleteProperty(Heater1SensorAssignSP);
         deleteProperty(Heater2TempNP);
         deleteProperty(Heater2PowerNP);
         deleteProperty(Heater2SetpointNP);
         deleteProperty(Heater2ModeSP);
         deleteProperty(Heater2SensorTP);
+        deleteProperty(Heater2SensorAssignSP);
         deleteProperty(AvailableSensorsTP);
         deleteProperty(PIDNP);
         deleteProperty(DewDeltaNP);
         deleteProperty(PowerMonitorNP);
+        deleteProperty(Heater1SafetySP);
+        deleteProperty(Heater2SafetySP);
+        deleteProperty(Heater1SafetyResetSP);
+        deleteProperty(Heater2SafetyResetSP);
+        deleteProperty(SafetyParamsNP);
     }
     
     return true;
@@ -182,30 +238,31 @@ bool AstrAlimHeater::Connect()
     // Scan for DS18B20 sensors
     availableDS18B20 = scanDS18B20Devices();
     
-    std::string sensorList;
-    for (const auto& sensor : availableDS18B20)
-    {
-        if (!sensorList.empty()) sensorList += ", ";
-        sensorList += sensor;
-    }
-    if (sensorList.empty()) sensorList = "None found";
-    AvailableSensorsTP[0].setText(sensorList.c_str());
-    AvailableSensorsTP.setState(IPS_OK);
-    AvailableSensorsTP.apply();
-    
     LOGF_INFO("Found %zu DS18B20 sensor(s)", availableDS18B20.size());
     
-    // Auto-assign sensors if available
+    // Mettre à jour la liste des capteurs avec statuts
+    updateSensorStatusList();
+    
+    // Auto-assign sensors if available (seulement si pas de config sauvegardée)
     if (availableDS18B20.size() >= 1 && strlen(Heater1SensorTP[0].getText()) == 0)
     {
         Heater1SensorTP[0].setText(availableDS18B20[0].c_str());
         ds18b20Path[0] = "/sys/bus/w1/devices/" + availableDS18B20[0] + "/w1_slave";
+        Heater1SensorTP.setState(IPS_OK);
+        Heater1SensorTP.apply();
+        LOGF_INFO("Auto-assigned sensor %s to Heater 1", availableDS18B20[0].c_str());
     }
     if (availableDS18B20.size() >= 2 && strlen(Heater2SensorTP[0].getText()) == 0)
     {
         Heater2SensorTP[0].setText(availableDS18B20[1].c_str());
         ds18b20Path[1] = "/sys/bus/w1/devices/" + availableDS18B20[1] + "/w1_slave";
+        Heater2SensorTP.setState(IPS_OK);
+        Heater2SensorTP.apply();
+        LOGF_INFO("Auto-assigned sensor %s to Heater 2", availableDS18B20[1].c_str());
     }
+    
+    // Valider les capteurs assignés
+    validateAssignedSensors();
     
     // Security: Force OFF mode on startup (even if saved config has different mode)
     Heater1ModeSP[MODE_OFF].setState(ISS_ON);
@@ -229,6 +286,16 @@ bool AstrAlimHeater::Connect()
     Heater2PowerNP.setState(IPS_IDLE);
     Heater1PowerNP.apply();
     Heater2PowerNP.apply();
+    
+    // Initialiser les états de sécurité
+    for (int i = 0; i < 2; i++)
+    {
+        safetyState[i].referencePower = 0;
+        safetyState[i].referenceTemp = 0;
+        safetyState[i].testActive = false;
+        safetyState[i].faultDetected = false;
+        safetyState[i].minTempIncrease = SafetyParamsNP[SAFETY_MIN_TEMP_INCREASE].getValue();
+    }
     
     // Initial readings
     readBME280();
@@ -270,6 +337,24 @@ void AstrAlimHeater::TimerHit()
     readDS18B20Sensors();
     readINA219();
     
+    // Mettre à jour la liste des capteurs avec statuts (toutes les 5 secondes)
+    static int sensorListUpdateCounter = 0;
+    if (++sensorListUpdateCounter >= 1)  // Mise à jour à chaque cycle (5 secondes)
+    {
+        updateSensorStatusList();
+        validateAssignedSensors();
+        sensorListUpdateCounter = 0;
+    }
+    
+    // Gérer les tests de détection automatique en cours
+    for (int ch = 0; ch < 2; ch++)
+    {
+        if (sensorAssignState[ch].autoDetectActive)
+        {
+            handleAutoDetect(ch);
+        }
+    }
+    
     // Handle heater modes
     for (int ch = 0; ch < 2; ch++)
     {
@@ -277,6 +362,143 @@ void AstrAlimHeater::TimerHit()
         INDI::PropertyNumber& powerNP = (ch == 0) ? Heater1PowerNP : Heater2PowerNP;
         INDI::PropertyNumber& setpointNP = (ch == 0) ? Heater1SetpointNP : Heater2SetpointNP;
         INDI::PropertyNumber& tempNP = (ch == 0) ? Heater1TempNP : Heater2TempNP;
+        INDI::PropertySwitch& safetySP = (ch == 0) ? Heater1SafetySP : Heater2SafetySP;
+        
+        // ===== Safety Monitoring (si activé) =====
+        bool safetyEnabled = (safetySP[SAFETY_ENABLE].getState() == ISS_ON);
+        
+        if (safetyEnabled)
+        {
+            // Mettre à jour le seuil de température minimale depuis les paramètres
+            safetyState[ch].minTempIncrease = SafetyParamsNP[SAFETY_MIN_TEMP_INCREASE].getValue();
+            
+            // Réinitialiser le test si conditions changent
+            if (safetyState[ch].testActive)
+            {
+                double currentPower = powerNP[0].getValue();
+                
+                if (modeSP[MODE_OFF].getState() == ISS_ON ||
+                    currentPower < safetyState[ch].referencePower ||
+                    tempNP[0].getValue() >= TEMP_UNAVAILABLE - 10)
+                {
+                    safetyState[ch].testActive = false;
+                    safetyState[ch].faultDetected = false;
+                }
+            }
+            
+            // Mettre à jour la puissance de référence si pas de test actif
+            if (!safetyState[ch].testActive && !safetyState[ch].faultDetected)
+            {
+                double currentPower = powerNP[0].getValue();
+                double powerIncreaseThreshold = SafetyParamsNP[SAFETY_POWER_INCREASE].getValue();
+                
+                // Si la puissance diminue, mettre à jour la référence
+                if (currentPower < safetyState[ch].referencePower)
+                {
+                    safetyState[ch].referencePower = currentPower;
+                }
+                // Détecter une augmentation de puissance de X% ou plus
+                else if (modeSP[MODE_OFF].getState() != ISS_ON && 
+                         tempNP[0].getValue() < TEMP_UNAVAILABLE - 10 &&
+                         currentPower >= safetyState[ch].referencePower + powerIncreaseThreshold &&
+                         currentPower > 0)
+                {
+                    // Démarrer un nouveau test de sécurité
+                    double currentTemp = tempNP[0].getValue();
+                    safetyState[ch].referencePower = currentPower;
+                    safetyState[ch].referenceTemp = currentTemp;
+                    safetyState[ch].testStartTime = std::chrono::steady_clock::now();
+                    safetyState[ch].testActive = true;
+                    safetyState[ch].faultDetected = false;
+                    
+                    LOGF_INFO("Heater %d: Safety test started (Power: %.0f%%, Temp: %.1f°C)", 
+                              ch+1, currentPower, currentTemp);
+                }
+            }
+            
+            // Vérification pendant le test
+            if (safetyState[ch].testActive && !safetyState[ch].faultDetected)
+            {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                    now - safetyState[ch].testStartTime).count();
+                
+                double currentTemp = tempNP[0].getValue();
+                double tempIncrease = currentTemp - safetyState[ch].referenceTemp;
+                int testDurationSec = static_cast<int>(SafetyParamsNP[SAFETY_TEST_DURATION].getValue() * 60);
+                
+                // Vérifier après la durée configurée
+                if (elapsed >= testDurationSec)
+                {
+                    if (tempIncrease < safetyState[ch].minTempIncrease)
+                    {
+                        // PROBLÈME DÉTECTÉ : La température n'a pas augmenté suffisamment
+                        safetyState[ch].faultDetected = true;
+                        safetyState[ch].testActive = false;
+                        
+                        // Signaler le problème (IPS_ALERT)
+                        modeSP.setState(IPS_ALERT);
+                        tempNP.setState(IPS_ALERT);
+                        powerNP.setState(IPS_ALERT);
+                        
+                        // Éteindre automatiquement pour sécurité
+                        setPWMDuty(ch, 0);
+                        powerNP[0].setValue(0);
+                        
+                        // Forcer le mode OFF
+                        modeSP[MODE_OFF].setState(ISS_ON);
+                        modeSP[MODE_MANUAL].setState(ISS_OFF);
+                        modeSP[MODE_AUTO].setState(ISS_OFF);
+                        
+                        // Message explicatif
+                        std::string errorMsg = "SÉCURITÉ: Heater " + std::to_string(ch+1) + 
+                            " désactivé. La température n'a pas augmenté de " +
+                            std::to_string(safetyState[ch].minTempIncrease) + "°C après " +
+                            std::to_string(testDurationSec/60) + 
+                            " minutes avec " + std::to_string(safetyState[ch].referencePower) + 
+                            "% de puissance. Vérifiez le capteur et la bande chauffante.";
+                        
+                        LOG_ERROR(errorMsg.c_str());
+                        
+                        // Appliquer les changements
+                        modeSP.apply();
+                        powerNP.apply();
+                        tempNP.apply();
+                    }
+                    else
+                    {
+                        // Test réussi : la température a bien augmenté
+                        safetyState[ch].testActive = false;
+                        LOGF_INFO("Heater %d: Safety test passed (Temp increased by %.2f°C)", 
+                                  ch+1, tempIncrease);
+                    }
+                }
+            }
+            
+            // Bloquer l'activation si une faute est détectée
+            if (safetyState[ch].faultDetected && modeSP[MODE_OFF].getState() != ISS_ON)
+            {
+                setPWMDuty(ch, 0);
+                powerNP[0].setValue(0);
+                modeSP[MODE_OFF].setState(ISS_ON);
+                modeSP[MODE_MANUAL].setState(ISS_OFF);
+                modeSP[MODE_AUTO].setState(ISS_OFF);
+                modeSP.setState(IPS_ALERT);
+                modeSP.apply();
+                powerNP.apply();
+            }
+        }
+        else
+        {
+            // Si la sécurité est désactivée, réinitialiser les états de test
+            if (safetyState[ch].testActive || safetyState[ch].faultDetected)
+            {
+                safetyState[ch].testActive = false;
+                safetyState[ch].faultDetected = false;
+            }
+            // Mettre à jour la référence même si sécurité désactivée
+            safetyState[ch].referencePower = powerNP[0].getValue();
+        }
         
         if (modeSP[MODE_OFF].getState() == ISS_ON)
         {
@@ -836,6 +1058,26 @@ bool AstrAlimHeater::ISNewNumber(const char* dev, const char* name, double value
             LOGF_INFO("Manual humidity set to %.0f%%", ManualHumidityNP[0].getValue());
             return true;
         }
+        
+        // Safety parameters
+        if (SafetyParamsNP.isNameMatch(name))
+        {
+            SafetyParamsNP.update(values, names, n);
+            SafetyParamsNP.setState(IPS_OK);
+            SafetyParamsNP.apply();
+            
+            // Mettre à jour les seuils dans les états de sécurité
+            for (int i = 0; i < 2; i++)
+            {
+                safetyState[i].minTempIncrease = SafetyParamsNP[SAFETY_MIN_TEMP_INCREASE].getValue();
+            }
+            
+            LOGF_INFO("Safety parameters updated (Power: %.1f%%, Duration: %.0f min, Min Temp: %.2f°C)",
+                      SafetyParamsNP[SAFETY_POWER_INCREASE].getValue(),
+                      SafetyParamsNP[SAFETY_TEST_DURATION].getValue(),
+                      SafetyParamsNP[SAFETY_MIN_TEMP_INCREASE].getValue());
+            return true;
+        }
     }
     
     return INDI::DefaultDevice::ISNewNumber(dev, name, values, names, n);
@@ -904,6 +1146,228 @@ bool AstrAlimHeater::ISNewSwitch(const char* dev, const char* name, ISState* sta
             Heater2PowerNP.apply();
             return true;
         }
+        
+        // Heater 1 Safety Enable/Disable
+        if (Heater1SafetySP.isNameMatch(name))
+        {
+            Heater1SafetySP.update(states, names, n);
+            Heater1SafetySP.setState(IPS_OK);
+            Heater1SafetySP.apply();
+            
+            if (Heater1SafetySP[SAFETY_ENABLE].getState() == ISS_ON)
+            {
+                LOG_INFO("Heater 1 safety monitoring ENABLED");
+            }
+            else
+            {
+                // Réinitialiser les états si désactivé
+                safetyState[0].testActive = false;
+                safetyState[0].faultDetected = false;
+                LOG_INFO("Heater 1 safety monitoring DISABLED");
+            }
+            return true;
+        }
+        
+        // Heater 2 Safety Enable/Disable
+        if (Heater2SafetySP.isNameMatch(name))
+        {
+            Heater2SafetySP.update(states, names, n);
+            Heater2SafetySP.setState(IPS_OK);
+            Heater2SafetySP.apply();
+            
+            if (Heater2SafetySP[SAFETY_ENABLE].getState() == ISS_ON)
+            {
+                LOG_INFO("Heater 2 safety monitoring ENABLED");
+            }
+            else
+            {
+                // Réinitialiser les états si désactivé
+                safetyState[1].testActive = false;
+                safetyState[1].faultDetected = false;
+                LOG_INFO("Heater 2 safety monitoring DISABLED");
+            }
+            return true;
+        }
+        
+        // Heater 1 Safety Reset
+        if (Heater1SafetyResetSP.isNameMatch(name))
+        {
+            Heater1SafetyResetSP.update(states, names, n);
+            
+            if (Heater1SafetyResetSP[0].getState() == ISS_ON)
+            {
+                // Réinitialiser l'état de sécurité
+                safetyState[0].faultDetected = false;
+                safetyState[0].testActive = false;
+                
+                // Remettre les états à IPS_OK si le mode est OFF
+                if (Heater1ModeSP[MODE_OFF].getState() == ISS_ON)
+                {
+                    Heater1ModeSP.setState(IPS_IDLE);
+                    Heater1TempNP.setState(IPS_OK);
+                    Heater1PowerNP.setState(IPS_IDLE);
+                    Heater1ModeSP.apply();
+                    Heater1TempNP.apply();
+                    Heater1PowerNP.apply();
+                }
+                
+                Heater1SafetyResetSP[0].setState(ISS_OFF);
+                Heater1SafetyResetSP.setState(IPS_OK);
+                Heater1SafetyResetSP.apply();
+                
+                LOG_INFO("Heater 1 safety fault state RESET");
+            }
+            return true;
+        }
+        
+        // Heater 2 Safety Reset
+        if (Heater2SafetyResetSP.isNameMatch(name))
+        {
+            Heater2SafetyResetSP.update(states, names, n);
+            
+            if (Heater2SafetyResetSP[0].getState() == ISS_ON)
+            {
+                // Réinitialiser l'état de sécurité
+                safetyState[1].faultDetected = false;
+                safetyState[1].testActive = false;
+                
+                // Remettre les états à IPS_OK si le mode est OFF
+                if (Heater2ModeSP[MODE_OFF].getState() == ISS_ON)
+                {
+                    Heater2ModeSP.setState(IPS_IDLE);
+                    Heater2TempNP.setState(IPS_OK);
+                    Heater2PowerNP.setState(IPS_IDLE);
+                    Heater2ModeSP.apply();
+                    Heater2TempNP.apply();
+                    Heater2PowerNP.apply();
+                }
+                
+                Heater2SafetyResetSP[0].setState(ISS_OFF);
+                Heater2SafetyResetSP.setState(IPS_OK);
+                Heater2SafetyResetSP.apply();
+                
+                LOG_INFO("Heater 2 safety fault state RESET");
+            }
+            return true;
+        }
+        
+        // Heater 1 Sensor Assignment
+        if (Heater1SensorAssignSP.isNameMatch(name))
+        {
+            Heater1SensorAssignSP.update(states, names, n);
+            
+            if (Heater1SensorAssignSP[SENSOR_ASSIGN_AUTO].getState() == ISS_ON)
+            {
+                if (autoDetectSensor(0))
+                {
+                    Heater1SensorAssignSP.setState(IPS_BUSY);
+                    LOG_INFO("Heater 1: Auto-detect started");
+                }
+                else
+                {
+                    Heater1SensorAssignSP[SENSOR_ASSIGN_AUTO].setState(ISS_OFF);
+                    Heater1SensorAssignSP.setState(IPS_ALERT);
+                }
+            }
+            else if (Heater1SensorAssignSP[SENSOR_ASSIGN_TEST].getState() == ISS_ON)
+            {
+                // Test de réponse pour le capteur actuellement assigné
+                if (strlen(Heater1SensorTP[0].getText()) > 0)
+                {
+                    std::string sensorId = Heater1SensorTP[0].getText();
+                    if (testSensorResponse(0, sensorId))
+                    {
+                        Heater1SensorAssignSP.setState(IPS_BUSY);
+                        LOG_INFO("Heater 1: Testing sensor response");
+                    }
+                    else
+                    {
+                        Heater1SensorAssignSP[SENSOR_ASSIGN_TEST].setState(ISS_OFF);
+                        Heater1SensorAssignSP.setState(IPS_ALERT);
+                    }
+                }
+                else
+                {
+                    LOG_WARN("Heater 1: No sensor assigned to test");
+                    Heater1SensorAssignSP[SENSOR_ASSIGN_TEST].setState(ISS_OFF);
+                    Heater1SensorAssignSP.setState(IPS_ALERT);
+                }
+            }
+            else if (Heater1SensorAssignSP[SENSOR_ASSIGN_CLEAR].getState() == ISS_ON)
+            {
+                // Effacer l'assignation
+                Heater1SensorTP[0].setText("");
+                ds18b20Path[0] = "";
+                Heater1SensorTP.setState(IPS_IDLE);
+                Heater1SensorTP.apply();
+                Heater1SensorAssignSP[SENSOR_ASSIGN_CLEAR].setState(ISS_OFF);
+                Heater1SensorAssignSP.setState(IPS_OK);
+                updateSensorStatusList();
+                LOG_INFO("Heater 1: Sensor assignment cleared");
+            }
+            
+            Heater1SensorAssignSP.apply();
+            return true;
+        }
+        
+        // Heater 2 Sensor Assignment
+        if (Heater2SensorAssignSP.isNameMatch(name))
+        {
+            Heater2SensorAssignSP.update(states, names, n);
+            
+            if (Heater2SensorAssignSP[SENSOR_ASSIGN_AUTO].getState() == ISS_ON)
+            {
+                if (autoDetectSensor(1))
+                {
+                    Heater2SensorAssignSP.setState(IPS_BUSY);
+                    LOG_INFO("Heater 2: Auto-detect started");
+                }
+                else
+                {
+                    Heater2SensorAssignSP[SENSOR_ASSIGN_AUTO].setState(ISS_OFF);
+                    Heater2SensorAssignSP.setState(IPS_ALERT);
+                }
+            }
+            else if (Heater2SensorAssignSP[SENSOR_ASSIGN_TEST].getState() == ISS_ON)
+            {
+                // Test de réponse pour le capteur actuellement assigné
+                if (strlen(Heater2SensorTP[0].getText()) > 0)
+                {
+                    std::string sensorId = Heater2SensorTP[0].getText();
+                    if (testSensorResponse(1, sensorId))
+                    {
+                        Heater2SensorAssignSP.setState(IPS_BUSY);
+                        LOG_INFO("Heater 2: Testing sensor response");
+                    }
+                    else
+                    {
+                        Heater2SensorAssignSP[SENSOR_ASSIGN_TEST].setState(ISS_OFF);
+                        Heater2SensorAssignSP.setState(IPS_ALERT);
+                    }
+                }
+                else
+                {
+                    LOG_WARN("Heater 2: No sensor assigned to test");
+                    Heater2SensorAssignSP[SENSOR_ASSIGN_TEST].setState(ISS_OFF);
+                    Heater2SensorAssignSP.setState(IPS_ALERT);
+                }
+            }
+            else if (Heater2SensorAssignSP[SENSOR_ASSIGN_CLEAR].getState() == ISS_ON)
+            {
+                // Effacer l'assignation
+                Heater2SensorTP[0].setText("");
+                ds18b20Path[1] = "";
+                Heater2SensorTP.setState(IPS_IDLE);
+                Heater2SensorTP.apply();
+                Heater2SensorAssignSP[SENSOR_ASSIGN_CLEAR].setState(ISS_OFF);
+                Heater2SensorAssignSP.setState(IPS_OK);
+                updateSensorStatusList();
+                LOG_INFO("Heater 2: Sensor assignment cleared");
+            }
+            
+            Heater2SensorAssignSP.apply();
+            return true;
+        }
     }
     
     return INDI::DefaultDevice::ISNewSwitch(dev, name, states, names, n);
@@ -917,9 +1381,33 @@ bool AstrAlimHeater::ISNewText(const char* dev, const char* name, char* texts[],
         if (Heater1SensorTP.isNameMatch(name))
         {
             Heater1SensorTP.update(texts, names, n);
-            Heater1SensorTP.setState(IPS_OK);
+            
+            // Valider que le capteur existe
+            std::string sensorId = Heater1SensorTP[0].getText();
+            bool found = false;
+            for (const auto& available : availableDS18B20)
+            {
+                if (available == sensorId)
+                {
+                    found = true;
+                    ds18b20Path[0] = "/sys/bus/w1/devices/" + sensorId + "/w1_slave";
+                    break;
+                }
+            }
+            
+            if (found)
+            {
+                Heater1SensorTP.setState(IPS_OK);
+                LOGF_INFO("Heater 1 sensor set to %s", sensorId.c_str());
+            }
+            else
+            {
+                Heater1SensorTP.setState(IPS_ALERT);
+                LOGF_WARN("Heater 1 sensor %s not found in available sensors", sensorId.c_str());
+            }
+            
             Heater1SensorTP.apply();
-            LOGF_INFO("Heater 1 sensor set to %s", Heater1SensorTP[0].getText());
+            updateSensorStatusList();
             return true;
         }
         
@@ -927,9 +1415,33 @@ bool AstrAlimHeater::ISNewText(const char* dev, const char* name, char* texts[],
         if (Heater2SensorTP.isNameMatch(name))
         {
             Heater2SensorTP.update(texts, names, n);
-            Heater2SensorTP.setState(IPS_OK);
+            
+            // Valider que le capteur existe
+            std::string sensorId = Heater2SensorTP[0].getText();
+            bool found = false;
+            for (const auto& available : availableDS18B20)
+            {
+                if (available == sensorId)
+                {
+                    found = true;
+                    ds18b20Path[1] = "/sys/bus/w1/devices/" + sensorId + "/w1_slave";
+                    break;
+                }
+            }
+            
+            if (found)
+            {
+                Heater2SensorTP.setState(IPS_OK);
+                LOGF_INFO("Heater 2 sensor set to %s", sensorId.c_str());
+            }
+            else
+            {
+                Heater2SensorTP.setState(IPS_ALERT);
+                LOGF_WARN("Heater 2 sensor %s not found in available sensors", sensorId.c_str());
+            }
+            
             Heater2SensorTP.apply();
-            LOGF_INFO("Heater 2 sensor set to %s", Heater2SensorTP[0].getText());
+            updateSensorStatusList();
             return true;
         }
     }
@@ -950,6 +1462,11 @@ bool AstrAlimHeater::saveConfigItems(FILE* fp)
     PIDNP.save(fp);
     DewDeltaNP.save(fp);
     ManualHumidityNP.save(fp);
+    Heater1SafetySP.save(fp);
+    Heater2SafetySP.save(fp);
+    SafetyParamsNP.save(fp);
+    Heater1SensorTP.save(fp);
+    Heater2SensorTP.save(fp);
     
     return true;
 }
@@ -971,6 +1488,331 @@ std::string AstrAlimHeater::execCommand(const char* cmd)
         result.pop_back();
     
     return result;
+}
+
+// ==================== Sensor Assignment Functions ====================
+
+double AstrAlimHeater::readDS18B20Temperature(const std::string& sensorId)
+{
+    std::string path = "/sys/bus/w1/devices/" + sensorId + "/w1_slave";
+    std::ifstream file(path);
+    
+    if (!file.is_open())
+    {
+        return TEMP_UNAVAILABLE;
+    }
+    
+    std::string line1, line2;
+    std::getline(file, line1);
+    std::getline(file, line2);
+    file.close();
+    
+    // Check CRC
+    if (line1.find("YES") == std::string::npos)
+    {
+        return TEMP_UNAVAILABLE;
+    }
+    
+    // Extract temperature
+    size_t pos = line2.find("t=");
+    if (pos != std::string::npos)
+    {
+        int tempMilliC = std::stoi(line2.substr(pos + 2));
+        return tempMilliC / 1000.0;
+    }
+    
+    return TEMP_UNAVAILABLE;
+}
+
+void AstrAlimHeater::updateSensorStatusList()
+{
+    // Re-scan pour détecter les nouveaux capteurs
+    availableDS18B20 = scanDS18B20Devices();
+    
+    // Construire une liste formatée avec tous les capteurs et leurs statuts
+    std::string sensorList;
+    int sensorCount = 0;
+    
+    for (const auto& sensorId : availableDS18B20)
+    {
+        if (sensorCount >= 10) break;  // Limite de 10 capteurs
+        
+        double temp = readDS18B20Temperature(sensorId);
+        std::string status;
+        std::string assignedTo;
+        
+        // Vérifier à quel heater ce capteur est assigné
+        if (strlen(Heater1SensorTP[0].getText()) > 0 && 
+            std::string(Heater1SensorTP[0].getText()) == sensorId)
+        {
+            assignedTo = " → Heater 1";
+            if (temp < TEMP_UNAVAILABLE - 10)
+                status = "✓";
+            else
+                status = "⚠";
+        }
+        else if (strlen(Heater2SensorTP[0].getText()) > 0 && 
+                 std::string(Heater2SensorTP[0].getText()) == sensorId)
+        {
+            assignedTo = " → Heater 2";
+            if (temp < TEMP_UNAVAILABLE - 10)
+                status = "✓";
+            else
+                status = "⚠";
+        }
+        else
+        {
+            assignedTo = " (Available)";
+            status = "🔍";
+        }
+        
+        if (!sensorList.empty()) sensorList += "\n";
+        
+        if (temp < TEMP_UNAVAILABLE - 10)
+        {
+            char line[256];
+            snprintf(line, sizeof(line), "%s %s Temp: %.1f°C%s", 
+                     status.c_str(), sensorId.c_str(), temp, assignedTo.c_str());
+            sensorList += line;
+        }
+        else
+        {
+            char line[256];
+            snprintf(line, sizeof(line), "%s %s Temp: N/A%s", 
+                     status.c_str(), sensorId.c_str(), assignedTo.c_str());
+            sensorList += line;
+        }
+        
+        sensorCount++;
+    }
+    
+    if (sensorList.empty())
+    {
+        sensorList = "No sensors found";
+    }
+    
+    // Mettre à jour la première propriété Text avec la liste complète
+    AvailableSensorsTP[0].setText(sensorList.c_str());
+    AvailableSensorsTP.setState(IPS_OK);
+    AvailableSensorsTP.apply();
+}
+
+void AstrAlimHeater::validateAssignedSensors()
+{
+    // Valider Heater 1
+    if (strlen(Heater1SensorTP[0].getText()) > 0)
+    {
+        std::string sensorId = Heater1SensorTP[0].getText();
+        bool found = false;
+        for (const auto& available : availableDS18B20)
+        {
+            if (available == sensorId)
+            {
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found)
+        {
+            Heater1SensorTP.setState(IPS_ALERT);
+            LOGF_WARN("Heater 1 assigned sensor %s not found!", sensorId.c_str());
+        }
+        else
+        {
+            double temp = readDS18B20Temperature(sensorId);
+            if (temp < TEMP_UNAVAILABLE - 10)
+            {
+                Heater1SensorTP.setState(IPS_OK);
+            }
+            else
+            {
+                Heater1SensorTP.setState(IPS_BUSY);
+            }
+        }
+        Heater1SensorTP.apply();
+    }
+    
+    // Valider Heater 2
+    if (strlen(Heater2SensorTP[0].getText()) > 0)
+    {
+        std::string sensorId = Heater2SensorTP[0].getText();
+        bool found = false;
+        for (const auto& available : availableDS18B20)
+        {
+            if (available == sensorId)
+            {
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found)
+        {
+            Heater2SensorTP.setState(IPS_ALERT);
+            LOGF_WARN("Heater 2 assigned sensor %s not found!", sensorId.c_str());
+        }
+        else
+        {
+            double temp = readDS18B20Temperature(sensorId);
+            if (temp < TEMP_UNAVAILABLE - 10)
+            {
+                Heater2SensorTP.setState(IPS_OK);
+            }
+            else
+            {
+                Heater2SensorTP.setState(IPS_BUSY);
+            }
+        }
+        Heater2SensorTP.apply();
+    }
+}
+
+bool AstrAlimHeater::autoDetectSensor(int heaterChannel)
+{
+    if (heaterChannel < 0 || heaterChannel > 1)
+        return false;
+    
+    INDI::PropertySwitch& modeSP = (heaterChannel == 0) ? Heater1ModeSP : Heater2ModeSP;
+    INDI::PropertyNumber& powerNP = (heaterChannel == 0) ? Heater1PowerNP : Heater2PowerNP;
+    
+    // Vérifier que le heater n'est pas déjà en mode AUTO ou MANUAL avec puissance
+    if (modeSP[MODE_AUTO].getState() == ISS_ON || 
+        (modeSP[MODE_MANUAL].getState() == ISS_ON && powerNP[0].getValue() > 0))
+    {
+        LOG_ERROR("Cannot start auto-detect: heater must be in OFF mode or MANUAL with 0% power");
+        return false;
+    }
+    
+    // Sauvegarder l'état actuel
+    ISState savedMode = modeSP[MODE_OFF].getState();
+    
+    // Activer le mode MANUAL temporairement
+    modeSP[MODE_OFF].setState(ISS_OFF);
+    modeSP[MODE_MANUAL].setState(ISS_ON);
+    modeSP[MODE_AUTO].setState(ISS_OFF);
+    modeSP.setState(IPS_BUSY);
+    modeSP.apply();
+    
+    // Lire les températures de départ de tous les capteurs
+    for (size_t i = 0; i < availableDS18B20.size() && i < 10; i++)
+    {
+        sensorAssignState[heaterChannel].testStartTemp[i] = 
+            readDS18B20Temperature(availableDS18B20[i]);
+    }
+    
+    // Activer le heater à 50% pour le test
+    sensorAssignState[heaterChannel].testPower = 50;
+    setPWMDuty(heaterChannel, sensorAssignState[heaterChannel].testPower);
+    powerNP[0].setValue(sensorAssignState[heaterChannel].testPower);
+    powerNP.setState(IPS_BUSY);
+    powerNP.apply();
+    
+    // Démarrer le test
+    sensorAssignState[heaterChannel].autoDetectActive = true;
+    sensorAssignState[heaterChannel].testStartTime = std::chrono::steady_clock::now();
+    
+    LOGF_INFO("Heater %d: Auto-detect started (Power: %d%%)", 
+              heaterChannel + 1, sensorAssignState[heaterChannel].testPower);
+    
+    return true;
+}
+
+void AstrAlimHeater::handleAutoDetect(int heaterChannel)
+{
+    if (heaterChannel < 0 || heaterChannel > 1)
+        return;
+    
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        now - sensorAssignState[heaterChannel].testStartTime).count();
+    
+    INDI::PropertySwitch& modeSP = (heaterChannel == 0) ? Heater1ModeSP : Heater2ModeSP;
+    INDI::PropertyNumber& powerNP = (heaterChannel == 0) ? Heater1PowerNP : Heater2PowerNP;
+    INDI::PropertyText& sensorTP = (heaterChannel == 0) ? Heater1SensorTP : Heater2SensorTP;
+    INDI::PropertySwitch& assignSP = (heaterChannel == 0) ? Heater1SensorAssignSP : Heater2SensorAssignSP;
+    
+    // Durée du test : 2 minutes
+    const int TEST_DURATION_SEC = 120;
+    
+    if (elapsed >= TEST_DURATION_SEC)
+    {
+        // Test terminé, analyser les résultats
+        double maxTempIncrease = 0;
+        int bestSensorIndex = -1;
+        
+        for (size_t i = 0; i < availableDS18B20.size() && i < 10; i++)
+        {
+            double currentTemp = readDS18B20Temperature(availableDS18B20[i]);
+            double startTemp = sensorAssignState[heaterChannel].testStartTemp[i];
+            
+            if (startTemp < TEMP_UNAVAILABLE - 10 && currentTemp < TEMP_UNAVAILABLE - 10)
+            {
+                double tempIncrease = currentTemp - startTemp;
+                if (tempIncrease > maxTempIncrease)
+                {
+                    maxTempIncrease = tempIncrease;
+                    bestSensorIndex = i;
+                }
+            }
+        }
+        
+        // Arrêter le heater
+        setPWMDuty(heaterChannel, 0);
+        powerNP[0].setValue(0);
+        modeSP[MODE_OFF].setState(ISS_ON);
+        modeSP[MODE_MANUAL].setState(ISS_OFF);
+        modeSP[MODE_AUTO].setState(ISS_OFF);
+        modeSP.setState(IPS_IDLE);
+        modeSP.apply();
+        powerNP.apply();
+        
+        // Assigner le meilleur capteur trouvé
+        if (bestSensorIndex >= 0 && maxTempIncrease >= 0.5)  // Au moins 0.5°C d'augmentation
+        {
+            std::string bestSensorId = availableDS18B20[bestSensorIndex];
+            sensorTP[0].setText(bestSensorId.c_str());
+            ds18b20Path[heaterChannel] = "/sys/bus/w1/devices/" + bestSensorId + "/w1_slave";
+            sensorTP.setState(IPS_OK);
+            sensorTP.apply();
+            
+            LOGF_INFO("Heater %d: Auto-detect completed - Assigned sensor %s (Temp increase: %.2f°C)", 
+                      heaterChannel + 1, bestSensorId.c_str(), maxTempIncrease);
+        }
+        else
+        {
+            LOG_WARN("Auto-detect completed but no suitable sensor found (increase < 0.5°C)");
+        }
+        
+        // Réinitialiser l'état
+        sensorAssignState[heaterChannel].autoDetectActive = false;
+        assignSP[0].setState(ISS_OFF);
+        assignSP.setState(IPS_IDLE);
+        assignSP.apply();
+        
+        // Mettre à jour la liste des capteurs
+        updateSensorStatusList();
+    }
+}
+
+bool AstrAlimHeater::testSensorResponse(int heaterChannel, const std::string& sensorId)
+{
+    // Cette fonction peut être utilisée pour tester un capteur spécifique
+    // Pour l'instant, on utilise la même logique que autoDetectSensor
+    // mais avec un capteur spécifique
+    
+    double startTemp = readDS18B20Temperature(sensorId);
+    if (startTemp >= TEMP_UNAVAILABLE - 10)
+    {
+        LOGF_ERROR("Cannot test sensor %s: invalid temperature reading", sensorId.c_str());
+        return false;
+    }
+    
+    LOGF_INFO("Testing sensor %s response for Heater %d", sensorId.c_str(), heaterChannel + 1);
+    
+    // Le test sera géré par handleAutoDetect avec un capteur spécifique
+    // Pour simplifier, on utilise autoDetectSensor qui teste tous les capteurs
+    return autoDetectSensor(heaterChannel);
 }
 
 void AstrAlimHeater::readINA219()
