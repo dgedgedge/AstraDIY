@@ -40,9 +40,13 @@ AstrAlimHeater::AstrAlimHeater()
         }
     }
     
-    // Initialiser le filtre du point de rosée
+    // Initialiser les filtres
     filteredDewPoint = DEWPOINT_UNAVAILABLE;
+    filteredTemp = 0.0;
+    filteredHumidity = 0.0;
     dewPointHistory.clear();
+    tempHistory.clear();
+    humidityHistory.clear();
 }
 
 AstrAlimHeater::~AstrAlimHeater()
@@ -386,6 +390,8 @@ void AstrAlimHeater::TimerHit()
             if (dewPoint > DEWPOINT_UNAVAILABLE + 10)
             {
                 targetTemp = dewPoint + DewDeltaNP[0].getValue();
+                // Arrondir la consigne à 0.1°C près pour éviter les variations d'affichage
+                targetTemp = std::round(targetTemp * 10.0) / 10.0;
             }
             else
             {
@@ -769,24 +775,31 @@ bool AstrAlimHeater::readBME280()
             humidity = ManualHumidityNP[0].getValue();
         }
         
+        // Filtrer la température et l'humidité avant de calculer le point de rosée
+        filteredTemp = filterValue(temp, tempHistory, TEMP_HUMIDITY_MIN_CHANGE);
+        filteredHumidity = filterValue(humidity, humidityHistory, TEMP_HUMIDITY_MIN_CHANGE);
+        
         AmbientNP[AMB_TEMPERATURE].setValue(temp);
         AmbientNP[AMB_PRESSURE].setValue(pressure);
         AmbientNP[AMB_HUMIDITY].setValue(humidity);
         
-        // Calculate dew point
+        // Calculate dew point using filtered values for stability
         if (humidity > 0)
         {
-            double dewPoint = calculateDewPoint(temp, humidity);
+            // Utiliser les valeurs filtrées pour calculer le point de rosée
+            double dewPoint = calculateDewPoint(filteredTemp, filteredHumidity);
             
-            // Filtrer le point de rosée avec une moyenne mobile
+            // Filtrer également le point de rosée calculé avec une moyenne mobile
             filteredDewPoint = filterDewPoint(dewPoint);
             
             AmbientNP[AMB_DEWPOINT].setValue(filteredDewPoint);
         }
         else
         {
-            // Réinitialiser le filtre si pas d'humidité
+            // Réinitialiser les filtres si pas d'humidité
             dewPointHistory.clear();
+            tempHistory.clear();
+            humidityHistory.clear();
             filteredDewPoint = DEWPOINT_UNAVAILABLE;
             AmbientNP[AMB_DEWPOINT].setValue(DEWPOINT_UNAVAILABLE);
         }
@@ -817,7 +830,36 @@ double AstrAlimHeater::calculateDewPoint(double temp, double humidity)
 
 double AstrAlimHeater::filterDewPoint(double newDewPoint)
 {
-    // Ajouter la nouvelle valeur à l'historique
+    // Si l'historique est vide, initialiser avec la nouvelle valeur
+    if (dewPointHistory.empty())
+    {
+        dewPointHistory.push_back(newDewPoint);
+        return newDewPoint;
+    }
+    
+    // Calculer la moyenne actuelle avant d'ajouter la nouvelle valeur
+    double currentAverage = 0.0;
+    if (dewPointHistory.size() > 0)
+    {
+        double sum = 0.0;
+        for (double value : dewPointHistory)
+        {
+            sum += value;
+        }
+        currentAverage = sum / dewPointHistory.size();
+    }
+    
+    // Vérifier si la variation est significative
+    double change = std::abs(newDewPoint - currentAverage);
+    
+    // Si la variation est trop faible, ne pas mettre à jour l'historique
+    // mais retourner la moyenne actuelle pour maintenir la stabilité
+    if (change < DEW_POINT_MIN_CHANGE && dewPointHistory.size() >= 3)
+    {
+        return currentAverage;
+    }
+    
+    // Ajouter la nouvelle valeur à l'historique seulement si la variation est significative
     dewPointHistory.push_back(newDewPoint);
     
     // Limiter la taille de l'historique
@@ -826,19 +868,63 @@ double AstrAlimHeater::filterDewPoint(double newDewPoint)
         dewPointHistory.erase(dewPointHistory.begin());
     }
     
-    // Si on n'a pas assez de valeurs, retourner la valeur actuelle
-    if (dewPointHistory.size() < 2)
-    {
-        return newDewPoint;
-    }
-    
-    // Calculer la moyenne mobile
+    // Calculer la nouvelle moyenne mobile
     double sum = 0.0;
     for (double value : dewPointHistory)
     {
         sum += value;
     }
     double average = sum / dewPointHistory.size();
+    
+    return average;
+}
+
+double AstrAlimHeater::filterValue(double newValue, std::vector<double>& history, double minChange)
+{
+    // Si l'historique est vide, initialiser avec la nouvelle valeur
+    if (history.empty())
+    {
+        history.push_back(newValue);
+        return newValue;
+    }
+    
+    // Calculer la moyenne actuelle
+    double currentAverage = 0.0;
+    if (history.size() > 0)
+    {
+        double sum = 0.0;
+        for (double value : history)
+        {
+            sum += value;
+        }
+        currentAverage = sum / history.size();
+    }
+    
+    // Vérifier si la variation est significative
+    double change = std::abs(newValue - currentAverage);
+    
+    // Si la variation est trop faible, ne pas mettre à jour l'historique
+    if (change < minChange && history.size() >= 3)
+    {
+        return currentAverage;
+    }
+    
+    // Ajouter la nouvelle valeur à l'historique seulement si la variation est significative
+    history.push_back(newValue);
+    
+    // Limiter la taille de l'historique (même taille que pour le point de rosée)
+    if (history.size() > DEW_POINT_FILTER_SIZE)
+    {
+        history.erase(history.begin());
+    }
+    
+    // Calculer la nouvelle moyenne mobile
+    double sum = 0.0;
+    for (double value : history)
+    {
+        sum += value;
+    }
+    double average = sum / history.size();
     
     return average;
 }

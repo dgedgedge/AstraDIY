@@ -60,6 +60,7 @@ private:
     void handleAutoDetect(int heaterChannel);
     bool testSensorResponse(int heaterChannel, const std::string& sensorId);
     double filterDewPoint(double newDewPoint);  // Filtre passe-bas pour le point de rosée
+    double filterValue(double newValue, std::vector<double>& history, double minChange);  // Filtre générique pour temp/humidité
     
     // Power monitoring
     void readINA219();
@@ -87,10 +88,16 @@ private:
     std::string ds18b20Path[2];
     std::vector<std::string> availableDS18B20;
     
-    // Dew point filtering (moving average)
-    static constexpr int DEW_POINT_FILTER_SIZE = 5;  // Nombre de valeurs pour la moyenne mobile
+    // Dew point filtering (moving average with minimum change threshold)
+    static constexpr int DEW_POINT_FILTER_SIZE = 10;  // Nombre de valeurs pour la moyenne mobile (augmenté pour plus de stabilité)
+    static constexpr double DEW_POINT_MIN_CHANGE = 0.1;  // Variation minimale requise pour mettre à jour (0.1°C)
+    static constexpr double TEMP_HUMIDITY_MIN_CHANGE = 0.05;  // Variation minimale pour temp/humidité (0.05°C ou 0.5%)
     std::vector<double> dewPointHistory;  // Historique des points de rosée
+    std::vector<double> tempHistory;  // Historique des températures ambiantes
+    std::vector<double> humidityHistory;  // Historique des humidités
     double filteredDewPoint;  // Point de rosée filtré
+    double filteredTemp;  // Température ambiante filtrée
+    double filteredHumidity;  // Humidité filtrée
     
     // Sensor assignment state
     struct SensorAssignState {
