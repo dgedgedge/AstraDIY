@@ -95,17 +95,6 @@ private:
     };
     SensorAssignState sensorAssignState[2];
 
-    // Safety monitoring for heater response
-    struct HeaterSafetyState {
-        double referencePower;        // Puissance de référence au début du test
-        double referenceTemp;        // Température de référence au début du test
-        std::chrono::steady_clock::time_point testStartTime;  // Début du test
-        bool testActive;              // Un test de sécurité est en cours
-        bool faultDetected;           // Un problème a été détecté
-        double minTempIncrease;       // Augmentation minimale attendue (°C)
-    };
-    HeaterSafetyState safetyState[2];  // Un pour chaque heater
-
     //========== Properties ==========
     
     // Ambient sensor (BME280)
@@ -148,15 +137,6 @@ private:
     // Power monitoring (if INA219 available)
     INDI::PropertyNumber PowerMonitorNP {4};
     enum { PWR_VOLTAGE1, PWR_CURRENT1, PWR_VOLTAGE2, PWR_CURRENT2 };
-    
-    // Safety monitoring (optional)
-    INDI::PropertySwitch Heater1SafetySP {2};  // Enable / Disable
-    enum { SAFETY_ENABLE, SAFETY_DISABLE };
-    INDI::PropertySwitch Heater2SafetySP {2};
-    INDI::PropertySwitch Heater1SafetyResetSP {1};  // Reset fault state
-    INDI::PropertySwitch Heater2SafetyResetSP {1};
-    INDI::PropertyNumber SafetyParamsNP {3};  // Configurable parameters
-    enum { SAFETY_POWER_INCREASE, SAFETY_TEST_DURATION, SAFETY_MIN_TEMP_INCREASE };
 
     // Constants
     static constexpr int POLL_INTERVAL_MS = 5000;
@@ -166,11 +146,6 @@ private:
     static constexpr double DEFAULT_DEW_DELTA = 2.0;
     static constexpr double TEMP_UNAVAILABLE = 100.0;
     static constexpr double DEWPOINT_UNAVAILABLE = -100.0;
-    
-    // Safety constants (defaults, can be configured)
-    static constexpr double DEFAULT_SAFETY_POWER_INCREASE = 10.0;  // 10% d'augmentation
-    static constexpr int DEFAULT_SAFETY_TEST_DURATION_SEC = 300;   // 5 minutes
-    static constexpr double DEFAULT_SAFETY_MIN_TEMP_INCREASE = 0.5; // 0.5°C minimum attendu
 };
 
 #endif // ASTRALIM_HEATER_H
