@@ -499,8 +499,15 @@ class DrewControl(QWidget):
         
         cmd = None
         if self.buttonRoseeConsigneOn:
+            # Mettre à jour la consigne depuis le point de rosée avant de l'afficher
+            self.AstraDrew.updateCmdTempfromTempRosee()
             cmd = self.AstraDrew.get_cmdTemp()
-            if cmd > -50: self.c_slider.setValue(int(cmd*10)); self.c_val.setText(f"{cmd:.1f}°C")
+            # Log pour debug : vérifier la valeur reçue et la condition
+            if cmd > -50:
+                self.c_slider.setValue(int(cmd*10))
+                self.c_val.setText(f"{cmd:.1f}°C")
+            else:
+                print(f"[DEBUG HMI update_text_fields] {self.name}: cmd={cmd:.1f}°C rejeté (condition cmd > -50 non remplie)")
         t = self.AstraDrew.get_temp()
         self.lbl_temp.setText(f"{t:.1f}°" if t != self.AstraDrew.TEMPUNAVAIL else "NC")
         

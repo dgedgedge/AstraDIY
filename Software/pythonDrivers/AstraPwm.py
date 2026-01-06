@@ -413,6 +413,8 @@ class AstraPwm():
             pass
 
     def get_cmdTemp(self):
+        # Log pour debug : vérifier la valeur retournée
+        print(f"[DEBUG get_cmdTemp] {self.name}: cmdTemp={self.cmdTemp}, asservTempRosee={self.asservTempRosee}")
         return self.cmdTemp
 
     def get_deltaTempRosee(self):
@@ -449,6 +451,7 @@ class AstraPwm():
                 cmdTemp = tempRosee + self.deltaTempRosee
                 cmdTemp_avant_arrondi = cmdTemp
                 # Arrondir la consigne à 0.1°C près pour éviter les variations d'affichage
+                cmdTemp_avant = self.cmdTemp  # Sauvegarder l'ancienne valeur pour debug
                 self.cmdTemp = round(cmdTemp * 10.0) / 10.0
                 
                 # Log détaillé des valeurs qui déterminent la consigne
@@ -457,9 +460,10 @@ class AstraPwm():
                       f"Hum(brute={hum_brute:.2f}%, filtrée={hum_filtree:.2f}%) | "
                       f"Rosée(brute={rosee_brute:.3f}°C, filtrée={rosee_filtree:.3f}°C) | "
                       f"Delta={self.deltaTempRosee:.1f}°C | "
-                      f"Consigne(avant_arrondi={cmdTemp_avant_arrondi:.3f}°C, après_arrondi={self.cmdTemp:.1f}°C)")
-            # Si le point de rosée n'est pas disponible, garder la consigne actuelle
-            # (ne pas la modifier pour éviter d'afficher -98°C)
+                      f"Consigne(avant_arrondi={cmdTemp_avant_arrondi:.3f}°C, après_arrondi={self.cmdTemp:.1f}°C, avant_update={cmdTemp_avant:.1f}°C)")
+            else:
+                # Si le point de rosée n'est pas disponible, garder la consigne actuelle
+                print(f"[CONSIGNE] {self.name}: Point de rosée indisponible (tempRosee={tempRosee:.3f}°C), conservation de cmdTemp={self.cmdTemp:.1f}°C")
 
     # Asserv Parameters
     def get_autoUpdateKpKiKd(self):
