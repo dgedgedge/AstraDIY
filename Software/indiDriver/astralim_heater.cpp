@@ -73,7 +73,9 @@ bool AstrAlimHeater::initProperties()
     ManualHumidityNP.fill(getDeviceName(), "MANUAL_HUMIDITY", "Manual Humidity", OPTIONS_TAB, IP_RW, 60, IPS_IDLE);
     
     // ===== Heater 1 =====
-    Heater1TempNP[0].fill("HEATER1_TEMP", "Temperature (°C)", "%.1f", -40, 125, 0.1, TEMP_UNAVAILABLE);
+    // Initialiser à 0 au lieu de TEMP_UNAVAILABLE pour éviter d'afficher 100°C au démarrage
+    // La valeur sera mise à jour lors de la première lecture dans Connect()
+    Heater1TempNP[0].fill("HEATER1_TEMP", "Temperature (°C)", "%.1f", -40, 125, 0.1, 0);
     Heater1TempNP.fill(getDeviceName(), "HEATER1_TEMPERATURE", "Heater 1 Temp", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
     
     Heater1PowerNP[0].fill("HEATER1_POWER", "Power (%)", "%.0f", 0, 100, 5, 0);
@@ -96,7 +98,9 @@ bool AstrAlimHeater::initProperties()
     Heater1SensorAssignSP.fill(getDeviceName(), "HEATER1_SENSOR_ASSIGN", "Heater 1 Sensor Assignment", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
     
     // ===== Heater 2 =====
-    Heater2TempNP[0].fill("HEATER2_TEMP", "Temperature (°C)", "%.1f", -40, 125, 0.1, TEMP_UNAVAILABLE);
+    // Initialiser à 0 au lieu de TEMP_UNAVAILABLE pour éviter d'afficher 100°C au démarrage
+    // La valeur sera mise à jour lors de la première lecture dans Connect()
+    Heater2TempNP[0].fill("HEATER2_TEMP", "Temperature (°C)", "%.1f", -40, 125, 0.1, 0);
     Heater2TempNP.fill(getDeviceName(), "HEATER2_TEMPERATURE", "Heater 2 Temp", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
     
     Heater2PowerNP[0].fill("HEATER2_POWER", "Power (%)", "%.0f", 0, 100, 5, 0);
@@ -119,9 +123,20 @@ bool AstrAlimHeater::initProperties()
     Heater2SensorAssignSP.fill(getDeviceName(), "HEATER2_SENSOR_ASSIGN", "Heater 2 Sensor Assignment", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
     
     // ===== Available Sensors =====
-    // Utiliser une seule propriété Text avec liste multiligne
-    AvailableSensorsTP[0].fill("SENSORS_LIST", "DS18B20 Sensors", "Scanning...");
-    AvailableSensorsTP.fill(getDeviceName(), "AVAILABLE_SENSORS", "Available Sensors", OPTIONS_TAB, IP_RO, 60, IPS_IDLE);
+    // Initialiser avec des slots vides, seront remplis dynamiquement
+    // Les noms seront mis à jour dans updateSensorStatusList()
+    for (int i = 0; i < 10; i++)
+    {
+        char name[32];
+        snprintf(name, sizeof(name), "SENSOR_%d", i);
+        AvailableSensorsSP[i].fill(name, "", ISS_OFF);
+    }
+    AvailableSensorsSP.fill(getDeviceName(), "AVAILABLE_SENSORS", "Available Sensors", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
+    
+    // ===== Sensor Assignment Actions =====
+    SensorAssignActionSP[ASSIGN_TO_HEATER1].fill("ASSIGN_TO_H1", "Assign to Heater 1", ISS_OFF);
+    SensorAssignActionSP[ASSIGN_TO_HEATER2].fill("ASSIGN_TO_H2", "Assign to Heater 2", ISS_OFF);
+    SensorAssignActionSP.fill(getDeviceName(), "SENSOR_ASSIGN_ACTION", "Assign Selected Sensor", OPTIONS_TAB, IP_RW, ISR_ATMOST1, 60, IPS_IDLE);
     
     // ===== PID Parameters =====
     PIDNP[PID_KP].fill("PID_KP", "Kp", "%.2f", 0, 10, 0.1, DEFAULT_KP);
@@ -186,7 +201,8 @@ bool AstrAlimHeater::updateProperties()
         defineProperty(Heater2ModeSP);
         defineProperty(Heater2SensorTP);
         defineProperty(Heater2SensorAssignSP);
-        defineProperty(AvailableSensorsTP);
+        defineProperty(AvailableSensorsSP);
+        defineProperty(SensorAssignActionSP);
         defineProperty(PIDNP);
         defineProperty(DewDeltaNP);
         defineProperty(PowerMonitorNP);
@@ -212,7 +228,8 @@ bool AstrAlimHeater::updateProperties()
         deleteProperty(Heater2ModeSP);
         deleteProperty(Heater2SensorTP);
         deleteProperty(Heater2SensorAssignSP);
-        deleteProperty(AvailableSensorsTP);
+        deleteProperty(AvailableSensorsSP);
+        deleteProperty(SensorAssignActionSP);
         deleteProperty(PIDNP);
         deleteProperty(DewDeltaNP);
         deleteProperty(PowerMonitorNP);
@@ -799,7 +816,9 @@ bool AstrAlimHeater::readDS18B20Sensors()
         const char* sensorId = sensorTP[0].getText();
         if (sensorId == nullptr || strlen(sensorId) == 0)
         {
-            tempNP[0].setValue(TEMP_UNAVAILABLE);
+            // Ne pas mettre TEMP_UNAVAILABLE (100°C) si aucun capteur n'est assigné
+            // Laisser la valeur à 0 (valeur par défaut) pour éviter d'afficher 100°C
+            // L'état IPS_IDLE indique que le capteur n'est pas configuré
             tempNP.setState(IPS_IDLE);
             tempNP.apply();
             continue;
@@ -1368,6 +1387,126 @@ bool AstrAlimHeater::ISNewSwitch(const char* dev, const char* name, ISState* sta
             Heater2SensorAssignSP.apply();
             return true;
         }
+        
+        // Available Sensors Selection
+        if (AvailableSensorsSP.isNameMatch(name))
+        {
+            AvailableSensorsSP.update(states, names, n);
+            
+            // Trouver quel capteur a été sélectionné
+            std::string selectedSensorId;
+            for (int i = 0; i < 10 && i < static_cast<int>(availableDS18B20.size()); i++)
+            {
+                if (AvailableSensorsSP[i].getState() == ISS_ON)
+                {
+                    selectedSensorId = availableDS18B20[i];
+                    break;
+                }
+            }
+            
+            if (!selectedSensorId.empty())
+            {
+                AvailableSensorsSP.setState(IPS_OK);
+                AvailableSensorsSP.apply();
+                LOGF_INFO("Sensor %s selected from list", selectedSensorId.c_str());
+            }
+            
+            return true;
+        }
+        
+        // Sensor Assignment Action
+        if (SensorAssignActionSP.isNameMatch(name))
+        {
+            SensorAssignActionSP.update(states, names, n);
+            
+            // Trouver quel capteur est sélectionné
+            std::string selectedSensorId;
+            for (int i = 0; i < 10 && i < static_cast<int>(availableDS18B20.size()); i++)
+            {
+                if (AvailableSensorsSP[i].getState() == ISS_ON)
+                {
+                    selectedSensorId = availableDS18B20[i];
+                    break;
+                }
+            }
+            
+            if (selectedSensorId.empty())
+            {
+                LOG_WARN("No sensor selected. Please select a sensor from the list first.");
+                SensorAssignActionSP[ASSIGN_TO_HEATER1].setState(ISS_OFF);
+                SensorAssignActionSP[ASSIGN_TO_HEATER2].setState(ISS_OFF);
+                SensorAssignActionSP.setState(IPS_ALERT);
+                SensorAssignActionSP.apply();
+                return true;
+            }
+            
+            // Vérifier que le capteur n'est pas déjà assigné à un autre heater
+            bool alreadyAssigned = false;
+            if (strlen(Heater1SensorTP[0].getText()) > 0 && 
+                std::string(Heater1SensorTP[0].getText()) == selectedSensorId)
+            {
+                alreadyAssigned = true;
+            }
+            if (strlen(Heater2SensorTP[0].getText()) > 0 && 
+                std::string(Heater2SensorTP[0].getText()) == selectedSensorId)
+            {
+                alreadyAssigned = true;
+            }
+            
+            if (SensorAssignActionSP[ASSIGN_TO_HEATER1].getState() == ISS_ON)
+            {
+                // Assigner au Heater 1
+                if (alreadyAssigned && std::string(Heater1SensorTP[0].getText()) != selectedSensorId)
+                {
+                    LOGF_WARN("Sensor %s is already assigned to another heater", selectedSensorId.c_str());
+                    SensorAssignActionSP[ASSIGN_TO_HEATER1].setState(ISS_OFF);
+                    SensorAssignActionSP.setState(IPS_ALERT);
+                }
+                else
+                {
+                    Heater1SensorTP[0].setText(selectedSensorId.c_str());
+                    ds18b20Path[0] = "/sys/bus/w1/devices/" + selectedSensorId + "/w1_slave";
+                    Heater1SensorTP.setState(IPS_OK);
+                    Heater1SensorTP.apply();
+                    
+                    SensorAssignActionSP[ASSIGN_TO_HEATER1].setState(ISS_OFF);
+                    SensorAssignActionSP.setState(IPS_OK);
+                    
+                    LOGF_INFO("Sensor %s assigned to Heater 1", selectedSensorId.c_str());
+                    
+                    // Mettre à jour la liste pour refléter l'assignation
+                    updateSensorStatusList();
+                }
+            }
+            else if (SensorAssignActionSP[ASSIGN_TO_HEATER2].getState() == ISS_ON)
+            {
+                // Assigner au Heater 2
+                if (alreadyAssigned && std::string(Heater2SensorTP[0].getText()) != selectedSensorId)
+                {
+                    LOGF_WARN("Sensor %s is already assigned to another heater", selectedSensorId.c_str());
+                    SensorAssignActionSP[ASSIGN_TO_HEATER2].setState(ISS_OFF);
+                    SensorAssignActionSP.setState(IPS_ALERT);
+                }
+                else
+                {
+                    Heater2SensorTP[0].setText(selectedSensorId.c_str());
+                    ds18b20Path[1] = "/sys/bus/w1/devices/" + selectedSensorId + "/w1_slave";
+                    Heater2SensorTP.setState(IPS_OK);
+                    Heater2SensorTP.apply();
+                    
+                    SensorAssignActionSP[ASSIGN_TO_HEATER2].setState(ISS_OFF);
+                    SensorAssignActionSP.setState(IPS_OK);
+                    
+                    LOGF_INFO("Sensor %s assigned to Heater 2", selectedSensorId.c_str());
+                    
+                    // Mettre à jour la liste pour refléter l'assignation
+                    updateSensorStatusList();
+                }
+            }
+            
+            SensorAssignActionSP.apply();
+            return true;
+        }
     }
     
     return INDI::DefaultDevice::ISNewSwitch(dev, name, states, names, n);
@@ -1529,72 +1668,86 @@ void AstrAlimHeater::updateSensorStatusList()
     // Re-scan pour détecter les nouveaux capteurs
     availableDS18B20 = scanDS18B20Devices();
     
-    // Construire une liste formatée avec tous les capteurs et leurs statuts
-    std::string sensorList;
-    int sensorCount = 0;
+    // Sauvegarder quel capteur est actuellement sélectionné
+    std::string selectedSensorId;
+    for (int i = 0; i < 10 && i < static_cast<int>(availableDS18B20.size()); i++)
+    {
+        if (AvailableSensorsSP[i].getState() == ISS_ON)
+        {
+            selectedSensorId = availableDS18B20[i];
+            break;
+        }
+    }
     
+    // Mettre à jour la liste avec les capteurs disponibles
+    int sensorCount = 0;
     for (const auto& sensorId : availableDS18B20)
     {
         if (sensorCount >= 10) break;  // Limite de 10 capteurs
         
         double temp = readDS18B20Temperature(sensorId);
-        std::string status;
-        std::string assignedTo;
+        std::string label;
         
         // Vérifier à quel heater ce capteur est assigné
+        bool isAssigned = false;
         if (strlen(Heater1SensorTP[0].getText()) > 0 && 
             std::string(Heater1SensorTP[0].getText()) == sensorId)
         {
-            assignedTo = " → Heater 1";
-            if (temp < TEMP_UNAVAILABLE - 10)
-                status = "✓";
-            else
-                status = "⚠";
+            label = sensorId + " → H1";
+            isAssigned = true;
         }
         else if (strlen(Heater2SensorTP[0].getText()) > 0 && 
                  std::string(Heater2SensorTP[0].getText()) == sensorId)
         {
-            assignedTo = " → Heater 2";
-            if (temp < TEMP_UNAVAILABLE - 10)
-                status = "✓";
-            else
-                status = "⚠";
+            label = sensorId + " → H2";
+            isAssigned = true;
         }
         else
         {
-            assignedTo = " (Available)";
-            status = "🔍";
+            label = sensorId;
         }
         
-        if (!sensorList.empty()) sensorList += "\n";
-        
+        // Ajouter la température au label
         if (temp < TEMP_UNAVAILABLE - 10)
         {
-            char line[256];
-            snprintf(line, sizeof(line), "%s %s Temp: %.1f°C%s", 
-                     status.c_str(), sensorId.c_str(), temp, assignedTo.c_str());
-            sensorList += line;
+            char tempStr[32];
+            snprintf(tempStr, sizeof(tempStr), " (%.1f°C)", temp);
+            label += tempStr;
         }
         else
         {
-            char line[256];
-            snprintf(line, sizeof(line), "%s %s Temp: N/A%s", 
-                     status.c_str(), sensorId.c_str(), assignedTo.c_str());
-            sensorList += line;
+            label += " (N/A)";
         }
+        
+        // Déterminer l'état : ON si assigné ou si c'est le capteur sélectionné
+        ISState state = ISS_OFF;
+        if (isAssigned)
+        {
+            state = ISS_ON;
+        }
+        else if (sensorId == selectedSensorId)
+        {
+            state = ISS_ON;
+        }
+        
+        // Mettre à jour le switch avec fill() pour définir le label
+        char name[32];
+        snprintf(name, sizeof(name), "SENSOR_%d", sensorCount);
+        AvailableSensorsSP[sensorCount].fill(name, label.c_str(), state);
         
         sensorCount++;
     }
     
-    if (sensorList.empty())
+    // Désactiver les slots non utilisés en les remplissant avec des labels vides
+    for (int i = sensorCount; i < 10; i++)
     {
-        sensorList = "No sensors found";
+        char name[32];
+        snprintf(name, sizeof(name), "SENSOR_%d", i);
+        AvailableSensorsSP[i].fill(name, "", ISS_OFF);
     }
     
-    // Mettre à jour la première propriété Text avec la liste complète
-    AvailableSensorsTP[0].setText(sensorList.c_str());
-    AvailableSensorsTP.setState(IPS_OK);
-    AvailableSensorsTP.apply();
+    AvailableSensorsSP.setState(IPS_OK);
+    AvailableSensorsSP.apply();
 }
 
 void AstrAlimHeater::validateAssignedSensors()

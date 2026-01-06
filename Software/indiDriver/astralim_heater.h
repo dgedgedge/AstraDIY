@@ -133,8 +133,10 @@ private:
     INDI::PropertyText Heater2SensorTP {1};
     INDI::PropertySwitch Heater2SensorAssignSP {3};  // Auto-Detect / Test / Clear
     
-    // Available sensors list with status
-    INDI::PropertyText AvailableSensorsTP {1};  // Liste formatée multiligne avec statuts
+    // Available sensors list (dropdown-like using Switch)
+    INDI::PropertySwitch AvailableSensorsSP {10};  // Liste déroulante avec Switch (max 10 capteurs)
+    INDI::PropertySwitch SensorAssignActionSP {2};  // Assigner le capteur sélectionné
+    enum { ASSIGN_TO_HEATER1, ASSIGN_TO_HEATER2 };
     
     // PID parameters (shared)
     INDI::PropertyNumber PIDNP {3};
