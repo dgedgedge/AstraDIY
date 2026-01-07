@@ -88,6 +88,9 @@ class AstraGps(threading.Thread):
         self.lat:float=0
         self.long:float=0
         self.alt:float=0
+        # Module presence and satellites
+        self.gpsPresent:bool = False
+        self.satVisible:int = 0  # Satellites visibles (sans forcément de fix)
 
     
         self.dispersionuS:float = 0
@@ -142,6 +145,14 @@ class AstraGps(threading.Thread):
 
     def gpsTimeStamp(self)->int:
         return self.timeStamp
+    
+    def gpsIsPresent(self)->bool:
+        """Retourne True si le module GPS est détecté"""
+        return self.gpsPresent
+    
+    def gpsSatVisible(self)->int:
+        """Retourne le nombre de satellites visibles (sans forcément de fix)"""
+        return self.satVisible
 
     def ntpTimeStampS(self)->int:
         return self.ntpMonitor.utcTimeS
@@ -189,6 +200,11 @@ class AstraGps(threading.Thread):
 
                 if report['class'] == 'PPS':
                     self.ppsSignal=(self.ppsSignal)%10+1
+                
+                if report['class'] == 'SKY':  # Satellite information
+                    # Nombre de satellites visibles (dans la liste satellites)
+                    satellites = getattr(report, 'satellites', [])
+                    self.satVisible = len(satellites)
 
             except KeyError:
                 # Ignore missing keys if no GPS data is available
@@ -196,8 +212,16 @@ class AstraGps(threading.Thread):
             except KeyboardInterrupt:
                 print("Exiting GPS collection.")
                 break
+            except StopIteration:
+                # GPS déconnecté ou pas de données
+                self.gpsPresent = False
+                time.sleep(1)  # Attendre avant de réessayer
+                continue
             except Exception as e:
                 print(f"Error: {e}")
+                self.gpsPresent = False
+                time.sleep(1)  # Attendre avant de réessayer
+                continue
 
             # ntp lib
             self.ntpMonitor.fetchNtpData()
