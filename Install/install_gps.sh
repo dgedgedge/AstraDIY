@@ -11,11 +11,15 @@ if ! grep -q "pps-gpio" ${BOOTFILE} ; then
     echo "L'option pps-gpio n'est pas dans le fichier /boot/firmware/config.txt. Ajout en cours..."
     cat >> ${BOOTFILE}  << "END1"
 
-# Begin AstrAlim gps
-# /dev/pps0
+# === AstrAlim GPS ===
+# Désactiver toute console série
+enable_uart=1
+# UART principal sur GPIO14 / GPIO15
+dtoverlay=uart0
+# PPS sur GPIO25
 dtoverlay=pps-gpio,gpiopin=25
-dtparam=uart0=on
-# End AstrAlim GPS
+# Optionnel mais recommandé
+dtparam=uart0_clkrate=48000000
 
 END1
    echo "Need to reboot for a full operational gps"

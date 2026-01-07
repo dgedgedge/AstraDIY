@@ -1,8 +1,13 @@
 [all]
-# Begin gps
-# /dev/pps0
+# Start GPS
+# Désactiver toute console série
+enable_uart=1
+# UART principal sur GPIO14 / GPIO15
+dtoverlay=uart0
+# PPS sur GPIO25
 dtoverlay=pps-gpio,gpiopin=25
-dtparam=uart0=on
+# Optionnel mais recommandé
+dtparam=uart0_clkrate=48000000
 # End GPS
 
 # Start TeenAstro
