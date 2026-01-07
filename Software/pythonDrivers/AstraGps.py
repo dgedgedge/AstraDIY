@@ -212,6 +212,10 @@ class AstraGps(threading.Thread):
             try:
                 # Wait for the next GPS report (blocking call)
                 report = session.next()
+                
+                # Marquer le GPS comme présent dès qu'on reçoit un rapport
+                self.gpsPresent = True
+                
                 # Handle different types of GPS reports
                 if report['class'] == 'TPV':  # Time-Position-Velocity report
                     self.fixMode = getattr(report, 'mode', 0)  # 0 = No fix, 2 = 2D fix, 3 = 3D fix
