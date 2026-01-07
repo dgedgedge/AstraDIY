@@ -175,7 +175,11 @@ class MainGpsWindow(QWidget):
         self.gps_fix.setStyleSheet(f"color: {'#10b981' if fix_ok else '#ef4444'}; font-weight: 900; font-size: 12px;")
         self.gps_led.setStyleSheet(f"color: {'#10b981' if fix_ok else '#ef4444'}; font-size: 14px;")
         
-        lat, lon, alt = self.gps.gpsGetStrPosition()
+        # Afficher les coordonnées en HMS si fix obtenu, sinon en décimal
+        if fix_ok:
+            lat, lon, alt = self.gps.gpsGetStrPositionHMS()
+        else:
+            lat, lon, alt = self.gps.gpsGetStrPosition()
         self.val_lat.setText(lat); self.val_lon.setText(lon); self.val_alt.setText(alt)
         self.val_gps_time.setText(str(self.gps.gpsTimeStamp()))
         self.val_pps.setText(f"COUNT: {self.gps.gpsCountPPS()}")

@@ -136,6 +136,37 @@ class AstraGps(threading.Thread):
         except:
             alt="N/A"
         return lat, long, alt
+    
+    def gpsGetStrPositionHMS(self):
+        """Retourne les coordonnées en format HMS (heures/minutes/secondes)"""
+        try:
+            # Conversion latitude en HMS
+            lat_deg = abs(self.lat)
+            lat_h = int(lat_deg)
+            lat_m = int((lat_deg - lat_h) * 60)
+            lat_s = ((lat_deg - lat_h) * 60 - lat_m) * 60
+            lat_dir = "N" if self.lat >= 0 else "S"
+            lat_hms = f"{lat_h:02d}°{lat_m:02d}'{lat_s:05.2f}\"{lat_dir}"
+        except:
+            lat_hms = "N/A"
+        
+        try:
+            # Conversion longitude en HMS
+            long_deg = abs(self.long)
+            long_h = int(long_deg)
+            long_m = int((long_deg - long_h) * 60)
+            long_s = ((long_deg - long_h) * 60 - long_m) * 60
+            long_dir = "E" if self.long >= 0 else "W"
+            long_hms = f"{long_h:02d}°{long_m:02d}'{long_s:05.2f}\"{long_dir}"
+        except:
+            long_hms = "N/A"
+        
+        try:
+            alt_hms = f"{self.alt:.1f}m"
+        except:
+            alt_hms = "N/A"
+        
+        return lat_hms, long_hms, alt_hms
         
     def gpsCountPPS(self)->int:
         return self.ppsSignal
