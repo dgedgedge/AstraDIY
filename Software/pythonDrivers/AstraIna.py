@@ -112,11 +112,14 @@ class AstraIna:
 
     # Dictionnaire associant les noms aux informations sur les capteurs INA219
     ina219_set = {
-            "AstraDc1": {"ispwm":False, "busnum":1, "address": 0x41, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 37, 
+            "AstraDc1": {"ispwm":False, "busnum":1, "address": 0x41, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 37,
+                         "force_abs_current_power": True,
                          "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
-            "AstraDc2": {"ispwm":False, "busnum":1, "address": 0x44, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 38, 
+            "AstraDc2": {"ispwm":False, "busnum":1, "address": 0x44, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 38,
+                         "force_abs_current_power": True,
                          "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
-            "AstraDc3": {"ispwm":False, "busnum":1, "address": 0x46, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 40, 
+            "AstraDc3": {"ispwm":False, "busnum":1, "address": 0x46, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 40,
+                         "force_abs_current_power": True,
                          "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
             "AstraPwm1": {"ispwm":True, "busnum":1, "address": 0x49, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":None, "pwm":1, 
                          "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
@@ -274,10 +277,23 @@ class AstraIna:
                 # Les logs montrent que le courant brut est déjà positif (469.939mA)
                 # L'inversion le rendait négatif, puis max(..., 0.0) le mettait à 0
                 
-                self._shuntVoltagemV = max(raw_shunt_mV, 0.0)
+                force_abs = False
+                if hasattr(self, "caract"):
+                    force_abs = bool(self.caract.get("force_abs_current_power", False))
+
+                # Keep sign for diagnostic by default.
+                # Some boards can wire shunt polarity opposite to "consumption"
+                # direction: in this case use absolute values for displayed/published
+                # current and power to avoid masking real load as zero.
+                if force_abs:
+                    self._currentmA = abs(raw_current_mA)
+                    self._powermW = abs(raw_power_mW)
+                else:
+                    self._currentmA = raw_current_mA
+                    self._powermW = raw_power_mW
+
+                self._shuntVoltagemV = raw_shunt_mV
                 self._voltageV = max(raw_voltage_V, 0.0)
-                self._currentmA = max(raw_current_mA, 0.0)
-                self._powermW = max(raw_power_mW, 0.0)
                 
                 # Debug détaillé pour les PWM (toutes les 25 lectures environ)
                 if "Pwm" in self.name:
@@ -518,6 +534,5 @@ if __name__ == "__main__":
                 currentA = current / 1000.0
 
                 print(f"{name}: Shunt {shunt_voltage:+.3f}mV, Bus {bus_voltage:+.3f}V Current: {currentA:+.3f}A, Power: {power:.3f}mW")
-
 
 
