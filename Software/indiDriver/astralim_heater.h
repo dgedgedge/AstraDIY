@@ -54,8 +54,9 @@ private:
     double calculateDewPoint(double temp, double humidity);
     std::vector<std::string> scanDS18B20Devices();
     double readDS18B20Temperature(const std::string& sensorId);
-    void updateSensorStatusList();
+    void updateSensorStatusList(bool rescanDevices = true);
     void validateAssignedSensors();
+    void autoAssignRemainingSensor(int assignedHeaterChannel, const std::string& assignedSensorId);
     bool autoDetectSensor(int heaterChannel);
     void handleAutoDetect(int heaterChannel);
     bool testSensorResponse(int heaterChannel, const std::string& sensorId);
@@ -153,6 +154,7 @@ private:
 
     // Constants
     static constexpr int POLL_INTERVAL_MS = 5000;
+    static constexpr int SENSOR_LIST_UPDATE_INTERVAL_CYCLES = 6;  // 30s with 5s poll
     static constexpr double DEFAULT_KP = 2.0;
     static constexpr double DEFAULT_KI = 0.1;
     static constexpr double DEFAULT_KD = 0.5;
@@ -162,4 +164,3 @@ private:
 };
 
 #endif // ASTRALIM_HEATER_H
-
