@@ -1334,6 +1334,7 @@ bool AstrAlimHeater::ISNewSwitch(const char* dev, const char* name, ISState* sta
 
                 SensorAssignActionSP[ASSIGN_TO_HEATER1].setState(ISS_OFF);
                 SensorAssignActionSP.setState(IPS_OK);
+                readDS18B20Sensors();
                 updateSensorStatusList();
             }
             else if (SensorAssignActionSP[ASSIGN_TO_HEATER2].getState() == ISS_ON)
@@ -1364,6 +1365,7 @@ bool AstrAlimHeater::ISNewSwitch(const char* dev, const char* name, ISState* sta
 
                 SensorAssignActionSP[ASSIGN_TO_HEATER2].setState(ISS_OFF);
                 SensorAssignActionSP.setState(IPS_OK);
+                readDS18B20Sensors();
                 updateSensorStatusList();
             }
             
@@ -1379,37 +1381,88 @@ bool AstrAlimHeater::ISNewText(const char* dev, const char* name, char* texts[],
 {
     if (dev && strcmp(dev, getDeviceName()) == 0)
     {
-        // Heater 1 Sensor
-        if (Heater1SensorTP.isNameMatch(name))
+        if (availableDS18B20.empty())
         {
-            Heater1SensorTP.update(texts, names, n);
-            
-            // Valider que le capteur existe
-            std::string sensorId = Heater1SensorTP[0].getText();
-            bool found = false;
+            availableDS18B20 = scanDS18B20Devices();
+        }
+
+        auto getAssignedSensor = [](INDI::PropertyText& sensorTP) -> std::string
+        {
+            const char* sensorId = sensorTP[0].getText();
+            if (sensorId == nullptr || strlen(sensorId) == 0)
+                return "";
+            return sensorId;
+        };
+
+        auto sensorExists = [this](const std::string& sensorId) -> bool
+        {
             for (const auto& available : availableDS18B20)
             {
                 if (available == sensorId)
-                {
-                    found = true;
-                    ds18b20Path[0] = "/sys/bus/w1/devices/" + sensorId + "/w1_slave";
-                    break;
-                }
+                    return true;
             }
-            
-            if (found)
+            return false;
+        };
+
+        // Heater 1 Sensor
+        if (Heater1SensorTP.isNameMatch(name))
+        {
+            const std::string previousH1 = getAssignedSensor(Heater1SensorTP);
+            const std::string previousH2 = getAssignedSensor(Heater2SensorTP);
+
+            Heater1SensorTP.update(texts, names, n);
+
+            std::string sensorId = getAssignedSensor(Heater1SensorTP);
+            if (sensorId.empty())
             {
-            Heater1SensorTP.setState(IPS_OK);
-                LOGF_INFO("Heater 1 sensor set to %s", sensorId.c_str());
-                autoAssignRemainingSensor(0, sensorId);
+                ds18b20Path[0].clear();
+                Heater1SensorTP.setState(IPS_IDLE);
+                Heater1SensorTP.apply();
+                readDS18B20Sensors();
+                updateSensorStatusList();
+                return true;
             }
-            else
+
+            if (!sensorExists(sensorId))
             {
                 Heater1SensorTP.setState(IPS_ALERT);
                 LOGF_WARN("Heater 1 sensor %s not found in available sensors", sensorId.c_str());
+                Heater1SensorTP.apply();
+                updateSensorStatusList();
+                return true;
             }
-            
+
+            // If sensor is currently assigned to Heater 2, move or swap instead of duplicating.
+            if (previousH2 == sensorId)
+            {
+                if (!previousH1.empty() && previousH1 != sensorId)
+                {
+                    Heater2SensorTP[0].setText(previousH1.c_str());
+                    ds18b20Path[1] = "/sys/bus/w1/devices/" + previousH1 + "/w1_slave";
+                    Heater2SensorTP.setState(IPS_OK);
+                    Heater2SensorTP.apply();
+
+                    LOGF_INFO("Swapped sensors via text input: Heater 1=%s, Heater 2=%s",
+                              sensorId.c_str(), previousH1.c_str());
+                }
+                else
+                {
+                    Heater2SensorTP[0].setText("");
+                    ds18b20Path[1].clear();
+                    Heater2SensorTP.setState(IPS_IDLE);
+                    Heater2SensorTP.apply();
+
+                    LOGF_INFO("Moved sensor %s from Heater 2 to Heater 1 via text input",
+                              sensorId.c_str());
+                }
+            }
+
+            ds18b20Path[0] = "/sys/bus/w1/devices/" + sensorId + "/w1_slave";
+            Heater1SensorTP.setState(IPS_OK);
+            LOGF_INFO("Heater 1 sensor set to %s", sensorId.c_str());
+            autoAssignRemainingSensor(0, sensorId);
             Heater1SensorTP.apply();
+            readDS18B20Sensors();
             updateSensorStatusList();
             return true;
         }
@@ -1417,34 +1470,62 @@ bool AstrAlimHeater::ISNewText(const char* dev, const char* name, char* texts[],
         // Heater 2 Sensor
         if (Heater2SensorTP.isNameMatch(name))
         {
+            const std::string previousH1 = getAssignedSensor(Heater1SensorTP);
+            const std::string previousH2 = getAssignedSensor(Heater2SensorTP);
+
             Heater2SensorTP.update(texts, names, n);
-            
-            // Valider que le capteur existe
-            std::string sensorId = Heater2SensorTP[0].getText();
-            bool found = false;
-            for (const auto& available : availableDS18B20)
+
+            std::string sensorId = getAssignedSensor(Heater2SensorTP);
+            if (sensorId.empty())
             {
-                if (available == sensorId)
-                {
-                    found = true;
-                    ds18b20Path[1] = "/sys/bus/w1/devices/" + sensorId + "/w1_slave";
-                    break;
-                }
+                ds18b20Path[1].clear();
+                Heater2SensorTP.setState(IPS_IDLE);
+                Heater2SensorTP.apply();
+                readDS18B20Sensors();
+                updateSensorStatusList();
+                return true;
             }
-            
-            if (found)
-            {
-            Heater2SensorTP.setState(IPS_OK);
-                LOGF_INFO("Heater 2 sensor set to %s", sensorId.c_str());
-                autoAssignRemainingSensor(1, sensorId);
-            }
-            else
+
+            if (!sensorExists(sensorId))
             {
                 Heater2SensorTP.setState(IPS_ALERT);
                 LOGF_WARN("Heater 2 sensor %s not found in available sensors", sensorId.c_str());
+                Heater2SensorTP.apply();
+                updateSensorStatusList();
+                return true;
             }
-            
+
+            // If sensor is currently assigned to Heater 1, move or swap instead of duplicating.
+            if (previousH1 == sensorId)
+            {
+                if (!previousH2.empty() && previousH2 != sensorId)
+                {
+                    Heater1SensorTP[0].setText(previousH2.c_str());
+                    ds18b20Path[0] = "/sys/bus/w1/devices/" + previousH2 + "/w1_slave";
+                    Heater1SensorTP.setState(IPS_OK);
+                    Heater1SensorTP.apply();
+
+                    LOGF_INFO("Swapped sensors via text input: Heater 1=%s, Heater 2=%s",
+                              previousH2.c_str(), sensorId.c_str());
+                }
+                else
+                {
+                    Heater1SensorTP[0].setText("");
+                    ds18b20Path[0].clear();
+                    Heater1SensorTP.setState(IPS_IDLE);
+                    Heater1SensorTP.apply();
+
+                    LOGF_INFO("Moved sensor %s from Heater 1 to Heater 2 via text input",
+                              sensorId.c_str());
+                }
+            }
+
+            ds18b20Path[1] = "/sys/bus/w1/devices/" + sensorId + "/w1_slave";
+            Heater2SensorTP.setState(IPS_OK);
+            LOGF_INFO("Heater 2 sensor set to %s", sensorId.c_str());
+            autoAssignRemainingSensor(1, sensorId);
             Heater2SensorTP.apply();
+            readDS18B20Sensors();
             updateSensorStatusList();
             return true;
         }
