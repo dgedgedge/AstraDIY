@@ -19,6 +19,7 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <chrono>
 
 class AstrAlimHeater : public INDI::DefaultDevice
 {
@@ -52,6 +53,15 @@ private:
     bool readBME280();
     double calculateDewPoint(double temp, double humidity);
     std::vector<std::string> scanDS18B20Devices();
+    double readDS18B20Temperature(const std::string& sensorId);
+    void updateSensorStatusList(bool rescanDevices = true);
+    void validateAssignedSensors();
+    void autoAssignRemainingSensor(int assignedHeaterChannel, const std::string& assignedSensorId);
+    bool autoDetectSensor(int heaterChannel);
+    void handleAutoDetect(int heaterChannel);
+    bool testSensorResponse(int heaterChannel, const std::string& sensorId);
+    double filterDewPoint(double newDewPoint);  // Filtre passe-bas pour le point de rosée
+    double filterValue(double newValue, std::vector<double>& history, double minChange);  // Filtre générique pour temp/humidité
     
     // Power monitoring
     void readINA219();
@@ -78,6 +88,26 @@ private:
     // DS18B20 sensor paths
     std::string ds18b20Path[2];
     std::vector<std::string> availableDS18B20;
+    
+    // Dew point filtering (moving average with minimum change threshold)
+    static constexpr int DEW_POINT_FILTER_SIZE = 10;  // Nombre de valeurs pour la moyenne mobile (augmenté pour plus de stabilité)
+    static constexpr double DEW_POINT_MIN_CHANGE = 0.1;  // Variation minimale requise pour mettre à jour (0.1°C)
+    static constexpr double TEMP_HUMIDITY_MIN_CHANGE = 0.05;  // Variation minimale pour temp/humidité (0.05°C ou 0.5%)
+    std::vector<double> dewPointHistory;  // Historique des points de rosée
+    std::vector<double> tempHistory;  // Historique des températures ambiantes
+    std::vector<double> humidityHistory;  // Historique des humidités
+    double filteredDewPoint;  // Point de rosée filtré
+    double filteredTemp;  // Température ambiante filtrée
+    double filteredHumidity;  // Humidité filtrée
+    
+    // Sensor assignment state
+    struct SensorAssignState {
+        bool autoDetectActive;                    // Test de détection automatique en cours
+        std::chrono::steady_clock::time_point testStartTime;
+        double testStartTemp[10];                  // Températures de départ pour chaque capteur testé
+        int testPower;                             // Puissance utilisée pour le test
+    };
+    SensorAssignState sensorAssignState[2];
 
     //========== Properties ==========
     
@@ -95,6 +125,8 @@ private:
     INDI::PropertySwitch Heater1ModeSP {3};      // Off / Manual / Auto
     enum { MODE_OFF, MODE_MANUAL, MODE_AUTO };
     INDI::PropertyText Heater1SensorTP {1};      // Associated DS18B20 sensor ID
+    INDI::PropertySwitch Heater1SensorAssignSP {3};  // Auto-Detect / Test / Clear
+    enum { SENSOR_ASSIGN_AUTO, SENSOR_ASSIGN_TEST, SENSOR_ASSIGN_CLEAR };
     
     // Heater 2 properties
     INDI::PropertyNumber Heater2TempNP {1};
@@ -102,9 +134,12 @@ private:
     INDI::PropertyNumber Heater2SetpointNP {1};
     INDI::PropertySwitch Heater2ModeSP {3};
     INDI::PropertyText Heater2SensorTP {1};
+    INDI::PropertySwitch Heater2SensorAssignSP {3};  // Auto-Detect / Test / Clear
     
-    // Available sensors list
-    INDI::PropertyText AvailableSensorsTP {1};
+    // Available sensors list (dropdown-like using Switch)
+    INDI::PropertySwitch AvailableSensorsSP {10};  // Liste déroulante avec Switch (max 10 capteurs)
+    INDI::PropertySwitch SensorAssignActionSP {2};  // Assigner le capteur sélectionné
+    enum { ASSIGN_TO_HEATER1, ASSIGN_TO_HEATER2 };
     
     // PID parameters (shared)
     INDI::PropertyNumber PIDNP {3};
@@ -119,6 +154,7 @@ private:
 
     // Constants
     static constexpr int POLL_INTERVAL_MS = 5000;
+    static constexpr int SENSOR_LIST_UPDATE_INTERVAL_CYCLES = 6;  // 30s with 5s poll
     static constexpr double DEFAULT_KP = 2.0;
     static constexpr double DEFAULT_KI = 0.1;
     static constexpr double DEFAULT_KD = 0.5;
@@ -128,4 +164,3 @@ private:
 };
 
 #endif // ASTRALIM_HEATER_H
-

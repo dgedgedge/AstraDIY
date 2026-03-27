@@ -39,6 +39,11 @@ class PIDConfigDialogShared(QDialog):
                 font-size: 13px;
                 font-weight: 600;
             }
+            QDoubleSpinBox:disabled { 
+                background-color: #0f172a; 
+                color: #475569; 
+                border: 1px solid #1e293b; 
+            }
             QPushButton#action { 
                 padding: 10px; 
                 border-radius: 6px; 
@@ -80,15 +85,25 @@ class PIDConfigDialogShared(QDialog):
         form.addRow("Kd (Dérivé)", self.kd_spin)
         layout.addLayout(form)
         
-        self.auto_btn = QPushButton("Auto-ajustement Intelligent")
-        self.auto_btn.setObjectName("action")
-        self.auto_btn.setCheckable(True)
-        if self.reference_astra_drew: self.auto_btn.setChecked(self.reference_astra_drew.get_autoUpdateKpKiKd())
-        self.auto_btn.setStyleSheet("""
-            QPushButton { background-color: #1e293b; color: #64748b; border: 1px solid #334155; }
-            QPushButton:checked { background-color: #3b82f6; color: white; border: none; }
-        """)
-        layout.addWidget(self.auto_btn)
+        # Switch Auto-ajustement avec label
+        auto_layout = QHBoxLayout()
+        auto_layout.setSpacing(15)
+        auto_label = QLabel("Auto-ajustement Intelligent")
+        auto_label.setStyleSheet("color: #94a3b8; font-weight: 700; font-size: 12px;")
+        
+        initial_auto_state = False
+        if self.reference_astra_drew: 
+            initial_auto_state = self.reference_astra_drew.get_autoUpdateKpKiKd()
+        
+        self.auto_toggle = AnimatedToggleButton(self, initial_state=initial_auto_state, 
+                                                toggle_callback=self.on_auto_toggle_changed)
+        auto_layout.addWidget(auto_label)
+        auto_layout.addStretch()
+        auto_layout.addWidget(self.auto_toggle)
+        layout.addLayout(auto_layout)
+        
+        # Initialiser l'état des spinboxes selon l'état initial
+        self.update_spinboxes_state(initial_auto_state)
         
         btns = QHBoxLayout()
         btns.setSpacing(10)
@@ -111,12 +126,26 @@ class PIDConfigDialogShared(QDialog):
         btns.addWidget(reset); btns.addStretch(); btns.addWidget(cancel); btns.addWidget(save)
         layout.addLayout(btns)
 
+    def on_auto_toggle_changed(self, state):
+        """Appelé quand le switch auto-ajustement change d'état"""
+        self.update_spinboxes_state(state)
+    
+    def update_spinboxes_state(self, auto_enabled):
+        """Met à jour l'état (activé/désactivé) des spinboxes selon l'état de l'auto-ajustement"""
+        self.kp_spin.setEnabled(not auto_enabled)
+        self.ki_spin.setEnabled(not auto_enabled)
+        self.kd_spin.setEnabled(not auto_enabled)
+
     def reset_to_defaults(self):
-        self.kp_spin.setValue(2.0); self.ki_spin.setValue(0.0); self.kd_spin.setValue(0.0); self.auto_btn.setChecked(False)
+        self.kp_spin.setValue(2.0)
+        self.ki_spin.setValue(0.0)
+        self.kd_spin.setValue(0.0)
+        self.auto_toggle.setState(False)
+        self.update_spinboxes_state(False)
 
     def accept_config(self):
         kp, ki, kd = self.kp_spin.value(), self.ki_spin.value(), self.kd_spin.value()
-        auto = self.auto_btn.isChecked()
+        auto = self.auto_toggle.isChecked()
         for w in self.widgets:
             w.AstraDrew.Kp, w.AstraDrew.Ki, w.AstraDrew.Kd = kp, ki, kd
             if auto: w.AstraDrew.set_autoUpdateKpKiKd()
@@ -467,15 +496,37 @@ class DrewControl(QWidget):
     def update_text_fields(self):
         if self.buttonAsservOn:
             r = self.AstraDrew.get_ratio(); self.p_slider.setValue(int(r)); self.p_val.setText(f"{int(r)}%")
+        
+        cmd = None
         if self.buttonRoseeConsigneOn:
+            # Mettre à jour la consigne depuis le point de rosée avant de l'afficher
+            self.AstraDrew.updateCmdTempfromTempRosee()
             cmd = self.AstraDrew.get_cmdTemp()
-            if cmd > -50: self.c_slider.setValue(int(cmd*10)); self.c_val.setText(f"{cmd:.1f}°C")
+            # Log pour debug : vérifier la valeur reçue et la condition
+            if cmd > -50:
+                self.c_slider.setValue(int(cmd*10))
+                self.c_val.setText(f"{cmd:.1f}°C")
+            else:
+                print(f"[DEBUG HMI update_text_fields] {self.name}: cmd={cmd:.1f}°C rejeté (condition cmd > -50 non remplie)")
         t = self.AstraDrew.get_temp()
         self.lbl_temp.setText(f"{t:.1f}°" if t != self.AstraDrew.TEMPUNAVAIL else "NC")
-        self.lbl_amb.setText(f"{self.AstraDrew.get_bmeTemp():.1f}°")
-        self.lbl_hum.setText(f"{self.AstraDrew.get_bmeHumidity():.0f}%")
+        
+        # Récupérer les valeurs pour affichage et logging
+        amb_temp = self.AstraDrew.get_bmeTemp()
+        amb_hum = self.AstraDrew.get_bmeHumidity()
         dew = self.AstraDrew.get_bmeTempRosee()
+        
+        self.lbl_amb.setText(f"{amb_temp:.1f}°")
+        self.lbl_hum.setText(f"{amb_hum:.0f}%")
         self.lbl_dew.setText(f"{dew:.1f}°" if dew != self.AstraDrew.ROSEEUNAVAIL else "--")
+        
+        # Log des valeurs affichées dans l'interface (si mode auto)
+        if self.buttonRoseeConsigneOn and cmd is not None:
+            print(f"[HMI] {self.name}: "
+                  f"Affichage - Temp_ambiante={amb_temp:.1f}°C | "
+                  f"Humidité={amb_hum:.0f}% | "
+                  f"Point_rosée={dew:.1f}°C | "
+                  f"Consigne={cmd:.1f}°C")
 
 
 class MainPwmWindow(QWidget):

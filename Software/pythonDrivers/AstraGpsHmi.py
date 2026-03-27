@@ -80,10 +80,14 @@ class MainGpsWindow(QWidget):
         gps_header = QHBoxLayout()
         gps_title = QLabel("🛰️ SIGNAL GPS")
         gps_title.setProperty("class", "title")
+        self.gps_module_status = QLabel("MODULE: --")
+        self.gps_module_status.setStyleSheet("color: #94a3b8; font-weight: 700; font-size: 10px;")
+        self.gps_sat_count = QLabel("SAT: --")
+        self.gps_sat_count.setStyleSheet("color: #94a3b8; font-weight: 700; font-size: 10px;")
         self.gps_led = QLabel("⬤")
         self.gps_fix = QLabel("NO FIX")
         self.gps_fix.setStyleSheet("color: #ef4444; font-weight: 900; font-size: 12px;")
-        gps_header.addWidget(gps_title); gps_header.addStretch(); gps_header.addWidget(self.gps_led); gps_header.addWidget(self.gps_fix)
+        gps_header.addWidget(gps_title); gps_header.addWidget(self.gps_module_status); gps_header.addWidget(self.gps_sat_count); gps_header.addStretch(); gps_header.addWidget(self.gps_led); gps_header.addWidget(self.gps_fix)
         gps_lay.addLayout(gps_header)
         
         # Ligne Coordonnées
@@ -153,14 +157,29 @@ class MainGpsWindow(QWidget):
         self.timer.start(1000)
 
     def update_fields(self):
-        # GPS
+        # GPS - Présence du module
+        gps_present = self.gps.gpsIsPresent()
+        self.gps_module_status.setText(f"MODULE: {'✓ DÉTECTÉ' if gps_present else '✗ ABSENT'}")
+        self.gps_module_status.setStyleSheet(f"color: {'#10b981' if gps_present else '#ef4444'}; font-weight: 700; font-size: 10px;")
+        
+        # GPS - Nombre de satellites
+        sat_count = self.gps.gpsSatVisible()
+        self.gps_sat_count.setText(f"SAT: {sat_count}")
+        sat_color = "#10b981" if sat_count >= 4 else "#f59e0b" if sat_count > 0 else "#94a3b8"
+        self.gps_sat_count.setStyleSheet(f"color: {sat_color}; font-weight: 700; font-size: 10px;")
+        
+        # GPS - Fix
         sync = self.gps.gpsSyncState()
         fix_ok = str(sync) in ["2", "3", "2D", "3D"]
         self.gps_fix.setText(f"FIX {sync}D" if fix_ok else "NO FIX")
         self.gps_fix.setStyleSheet(f"color: {'#10b981' if fix_ok else '#ef4444'}; font-weight: 900; font-size: 12px;")
         self.gps_led.setStyleSheet(f"color: {'#10b981' if fix_ok else '#ef4444'}; font-size: 14px;")
         
-        lat, lon, alt = self.gps.gpsGetStrPosition()
+        # Afficher les coordonnées en HMS si fix obtenu, sinon en décimal
+        if fix_ok:
+            lat, lon, alt = self.gps.gpsGetStrPositionHMS()
+        else:
+            lat, lon, alt = self.gps.gpsGetStrPosition()
         self.val_lat.setText(lat); self.val_lon.setText(lon); self.val_alt.setText(alt)
         self.val_gps_time.setText(str(self.gps.gpsTimeStamp()))
         self.val_pps.setText(f"COUNT: {self.gps.gpsCountPPS()}")

@@ -88,6 +88,9 @@ class AstraGps(threading.Thread):
         self.lat:float=0
         self.long:float=0
         self.alt:float=0
+        # Module presence and satellites
+        self.gpsPresent:bool = False
+        self.satVisible:int = 0  # Satellites visibles (sans forcément de fix)
 
     
         self.dispersionuS:float = 0
@@ -133,6 +136,37 @@ class AstraGps(threading.Thread):
         except:
             alt="N/A"
         return lat, long, alt
+    
+    def gpsGetStrPositionHMS(self):
+        """Retourne les coordonnées en format HMS (heures/minutes/secondes)"""
+        try:
+            # Conversion latitude en HMS
+            lat_deg = abs(self.lat)
+            lat_h = int(lat_deg)
+            lat_m = int((lat_deg - lat_h) * 60)
+            lat_s = ((lat_deg - lat_h) * 60 - lat_m) * 60
+            lat_dir = "N" if self.lat >= 0 else "S"
+            lat_hms = f"{lat_h:02d}°{lat_m:02d}'{lat_s:05.2f}\"{lat_dir}"
+        except:
+            lat_hms = "N/A"
+        
+        try:
+            # Conversion longitude en HMS
+            long_deg = abs(self.long)
+            long_h = int(long_deg)
+            long_m = int((long_deg - long_h) * 60)
+            long_s = ((long_deg - long_h) * 60 - long_m) * 60
+            long_dir = "E" if self.long >= 0 else "W"
+            long_hms = f"{long_h:02d}°{long_m:02d}'{long_s:05.2f}\"{long_dir}"
+        except:
+            long_hms = "N/A"
+        
+        try:
+            alt_hms = f"{self.alt:.1f}m"
+        except:
+            alt_hms = "N/A"
+        
+        return lat_hms, long_hms, alt_hms
         
     def gpsCountPPS(self)->int:
         return self.ppsSignal
@@ -142,6 +176,14 @@ class AstraGps(threading.Thread):
 
     def gpsTimeStamp(self)->int:
         return self.timeStamp
+    
+    def gpsIsPresent(self)->bool:
+        """Retourne True si le module GPS est détecté"""
+        return self.gpsPresent
+    
+    def gpsSatVisible(self)->int:
+        """Retourne le nombre de satellites visibles (sans forcément de fix)"""
+        return self.satVisible
 
     def ntpTimeStampS(self)->int:
         return self.ntpMonitor.utcTimeS
@@ -170,6 +212,10 @@ class AstraGps(threading.Thread):
             try:
                 # Wait for the next GPS report (blocking call)
                 report = session.next()
+                
+                # Marquer le GPS comme présent dès qu'on reçoit un rapport
+                self.gpsPresent = True
+                
                 # Handle different types of GPS reports
                 if report['class'] == 'TPV':  # Time-Position-Velocity report
                     self.fixMode = getattr(report, 'mode', 0)  # 0 = No fix, 2 = 2D fix, 3 = 3D fix
@@ -189,6 +235,11 @@ class AstraGps(threading.Thread):
 
                 if report['class'] == 'PPS':
                     self.ppsSignal=(self.ppsSignal)%10+1
+                
+                if report['class'] == 'SKY':  # Satellite information
+                    # Nombre de satellites visibles (dans la liste satellites)
+                    satellites = getattr(report, 'satellites', [])
+                    self.satVisible = len(satellites)
 
             except KeyError:
                 # Ignore missing keys if no GPS data is available
@@ -196,8 +247,16 @@ class AstraGps(threading.Thread):
             except KeyboardInterrupt:
                 print("Exiting GPS collection.")
                 break
+            except StopIteration:
+                # GPS déconnecté ou pas de données
+                self.gpsPresent = False
+                time.sleep(1)  # Attendre avant de réessayer
+                continue
             except Exception as e:
                 print(f"Error: {e}")
+                self.gpsPresent = False
+                time.sleep(1)  # Attendre avant de réessayer
+                continue
 
             # ntp lib
             self.ntpMonitor.fetchNtpData()

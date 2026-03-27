@@ -49,6 +49,17 @@ class AstraTempFetcher(threading.Thread):
         self.bme_humidity=0
         self.bme_tempRosee=self.TEMPUNAVAIL
         self.manual_humidity=None  # Humidité saisie manuellement (pour BMP280)
+        
+        # Filtrage pour stabiliser les valeurs
+        self.DEW_POINT_FILTER_SIZE = 10  # Nombre de valeurs pour la moyenne mobile
+        self.DEW_POINT_MIN_CHANGE = 0.1  # Variation minimale requise pour mettre à jour (0.1°C)
+        self.TEMP_HUMIDITY_MIN_CHANGE = 0.05  # Variation minimale pour temp/humidité (0.05°C ou 0.5%)
+        self.dewPointHistory = []  # Historique des points de rosée
+        self.tempHistory = []  # Historique des températures ambiantes
+        self.humidityHistory = []  # Historique des humidités
+        self.filteredDewPoint = self.TEMPUNAVAIL  # Point de rosée filtré
+        self.filteredTemp = 0.0  # Température ambiante filtrée
+        self.filteredHumidity = 0.0  # Humidité filtrée
 
 
     @classmethod
@@ -119,9 +130,8 @@ class AstraTempFetcher(threading.Thread):
                 self.bme_temperature,self.bme_pressure,self.bme_humidity = readBME280All()
                 self.bme_present = True
                 
-                # Calcul du point de rosée (nécessite humidité > 0)
-                # ref : https://fr.planetcalc.com/248/
-                # ref : https://fr.wikipedia.org/wiki/Point_de_ros%C3%A9e
+                # Filtrer la température et l'humidité avant de calculer le point de rosée
+                self.filteredTemp = self._filter_value(self.bme_temperature, self.tempHistory, self.TEMP_HUMIDITY_MIN_CHANGE)
                 
                 # Déterminer quelle humidité utiliser
                 humidity_to_use = self.bme_humidity
@@ -129,18 +139,37 @@ class AstraTempFetcher(threading.Thread):
                     # BMP280 avec humidité manuelle
                     humidity_to_use = self.manual_humidity
                 
+                # Filtrer l'humidité
+                self.filteredHumidity = self._filter_value(humidity_to_use, self.humidityHistory, self.TEMP_HUMIDITY_MIN_CHANGE)
+                
+                # Calcul du point de rosée (nécessite humidité > 0)
+                # ref : https://fr.planetcalc.com/248/
+                # ref : https://fr.wikipedia.org/wiki/Point_de_ros%C3%A9e
+                
                 if humidity_to_use > 0:
+                    # Utiliser les valeurs filtrées pour calculer le point de rosée
                     a=17.27
                     b=237.7
-                    facteur=((a*self.bme_temperature) / (b+self.bme_temperature)) + math.log(humidity_to_use/100)
-                    self.bme_tempRosee = b*(facteur)/(a-(facteur))
+                    facteur=((a*self.filteredTemp) / (b+self.filteredTemp)) + math.log(self.filteredHumidity/100)
+                    dewPoint = b*(facteur)/(a-(facteur))
+                    
+                    # Filtrer également le point de rosée calculé
+                    self.bme_tempRosee = self._filter_dew_point(dewPoint)
                 else:
                     # Pas d'humidité disponible
+                    self.dewPointHistory.clear()
+                    self.tempHistory.clear()
+                    self.humidityHistory.clear()
+                    self.filteredDewPoint = self.ROSEEUNAVAIL
                     self.bme_tempRosee = self.ROSEEUNAVAIL
                     
             except Exception as e:
                 # print(e)
                 self.bme_present=False
+                self.dewPointHistory.clear()
+                self.tempHistory.clear()
+                self.humidityHistory.clear()
+                self.filteredDewPoint = self.ROSEEUNAVAIL
                 self.bme_tempRosee=self.ROSEEUNAVAIL
                 self.bme_temperature=self.TEMPUNAVAIL
                 pass
@@ -148,6 +177,65 @@ class AstraTempFetcher(threading.Thread):
             time.sleep(1)
 
             
+    def _filter_value(self, new_value, history, min_change):
+        """Filtre passe-bas avec seuil de variation minimum pour température/humidité"""
+        # Si l'historique est vide, initialiser avec la nouvelle valeur
+        if len(history) == 0:
+            history.append(new_value)
+            return new_value
+        
+        # Calculer la moyenne actuelle
+        current_average = sum(history) / len(history) if len(history) > 0 else new_value
+        
+        # Vérifier si la variation est significative
+        change = abs(new_value - current_average)
+        
+        # Si la variation est trop faible, ne pas mettre à jour l'historique
+        if change < min_change and len(history) >= 3:
+            return current_average
+        
+        # Ajouter la nouvelle valeur à l'historique seulement si la variation est significative
+        history.append(new_value)
+        
+        # Limiter la taille de l'historique
+        if len(history) > self.DEW_POINT_FILTER_SIZE:
+            history.pop(0)
+        
+        # Calculer la nouvelle moyenne mobile
+        average = sum(history) / len(history)
+        return average
+    
+    def _filter_dew_point(self, new_dew_point):
+        """Filtre passe-bas avec seuil de variation minimum pour le point de rosée"""
+        # Si l'historique est vide, initialiser avec la nouvelle valeur
+        if len(self.dewPointHistory) == 0:
+            self.dewPointHistory.append(new_dew_point)
+            self.filteredDewPoint = new_dew_point
+            return new_dew_point
+        
+        # Calculer la moyenne actuelle avant d'ajouter la nouvelle valeur
+        current_average = sum(self.dewPointHistory) / len(self.dewPointHistory) if len(self.dewPointHistory) > 0 else new_dew_point
+        
+        # Vérifier si la variation est significative
+        change = abs(new_dew_point - current_average)
+        
+        # Si la variation est trop faible, ne pas mettre à jour l'historique
+        if change < self.DEW_POINT_MIN_CHANGE and len(self.dewPointHistory) >= 3:
+            self.filteredDewPoint = current_average
+            return current_average
+        
+        # Ajouter la nouvelle valeur à l'historique seulement si la variation est significative
+        self.dewPointHistory.append(new_dew_point)
+        
+        # Limiter la taille de l'historique
+        if len(self.dewPointHistory) > self.DEW_POINT_FILTER_SIZE:
+            self.dewPointHistory.pop(0)
+        
+        # Calculer la nouvelle moyenne mobile
+        average = sum(self.dewPointHistory) / len(self.dewPointHistory)
+        self.filteredDewPoint = average
+        return average
+
     def stop(self):
         self.running = False
         self.join()
@@ -189,14 +277,20 @@ class AstraTempFetcher(threading.Thread):
         """Définit manuellement l'humidité (pour BMP280 sans capteur d'humidité)"""
         with self.lock:
             self.manual_humidity = humidity
+            # Filtrer l'humidité manuelle
+            self.filteredHumidity = self._filter_value(humidity, self.humidityHistory, self.TEMP_HUMIDITY_MIN_CHANGE)
+            
             # Recalculer le point de rosée si on a la température
             if self.bme_temperature != self.TEMPUNAVAIL and humidity > 0:
                 try:
                     import math
                     a = 17.27
                     b = 237.7
-                    alpha = ((a * self.bme_temperature) / (b + self.bme_temperature)) + math.log(humidity / 100.0)
-                    self.bme_tempRosee = (b * alpha) / (a - alpha)
+                    # Utiliser les valeurs filtrées pour calculer le point de rosée
+                    alpha = ((a * self.filteredTemp) / (b + self.filteredTemp)) + math.log(self.filteredHumidity / 100.0)
+                    dewPoint = (b * alpha) / (a - alpha)
+                    # Filtrer également le point de rosée calculé
+                    self.bme_tempRosee = self._filter_dew_point(dewPoint)
                 except:
                     self.bme_tempRosee = self.ROSEEUNAVAIL
 
@@ -288,7 +382,7 @@ class AstraPwm():
 
         # Aserv
         self.thread=None
-        self.autoUpdateKpKiKd=True
+        self.autoUpdateKpKiKd=False  # Par défaut OFF au premier lancement
         self.Kp = 2
         self.Ki = 0.0
         self.Kd = 0.0
@@ -319,6 +413,8 @@ class AstraPwm():
             pass
 
     def get_cmdTemp(self):
+        # Log pour debug : vérifier la valeur retournée
+        print(f"[DEBUG get_cmdTemp] {self.name}: cmdTemp={self.cmdTemp}, asservTempRosee={self.asservTempRosee}")
         return self.cmdTemp
 
     def get_deltaTempRosee(self):
@@ -335,12 +431,39 @@ class AstraPwm():
 
     def updateCmdTempfromTempRosee(self):
         if self.asservTempRosee: 
-            tempRosee = self.get_bmeTempRosee()
+            # Récupérer les valeurs brutes et filtrées pour le logging
+            temp_brute = self.AstraTempFetcher.bme_temperature
+            temp_filtree = self.AstraTempFetcher.filteredTemp
+            hum_brute = self.AstraTempFetcher.bme_humidity
+            hum_filtree = self.AstraTempFetcher.filteredHumidity
+            rosee_brute = self.get_bmeTempRosee()
+            rosee_filtree = self.AstraTempFetcher.filteredDewPoint
+            
+            # Utiliser le point de rosée filtré pour éviter les variations
+            tempRosee = rosee_filtree
+            
+            # Si le filtre n'est pas encore initialisé, utiliser la valeur brute
+            if tempRosee == self.ROSEEUNAVAIL or tempRosee == self.TEMPUNAVAIL:
+                tempRosee = rosee_brute
+            
             # Vérifier si le point de rosée est disponible
-            if tempRosee != self.ROSEEUNAVAIL:
-                self.cmdTemp = tempRosee + self.deltaTempRosee
-            # Si le point de rosée n'est pas disponible, garder la consigne actuelle
-            # (ne pas la modifier pour éviter d'afficher -98°C)
+            if tempRosee != self.ROSEEUNAVAIL and tempRosee != self.TEMPUNAVAIL:
+                cmdTemp = tempRosee + self.deltaTempRosee
+                cmdTemp_avant_arrondi = cmdTemp
+                # Arrondir la consigne à 0.1°C près pour éviter les variations d'affichage
+                cmdTemp_avant = self.cmdTemp  # Sauvegarder l'ancienne valeur pour debug
+                self.cmdTemp = round(cmdTemp * 10.0) / 10.0
+                
+                # Log détaillé des valeurs qui déterminent la consigne
+                print(f"[CONSIGNE] {self.name}: "
+                      f"Temp(brute={temp_brute:.3f}°C, filtrée={temp_filtree:.3f}°C) | "
+                      f"Hum(brute={hum_brute:.2f}%, filtrée={hum_filtree:.2f}%) | "
+                      f"Rosée(brute={rosee_brute:.3f}°C, filtrée={rosee_filtree:.3f}°C) | "
+                      f"Delta={self.deltaTempRosee:.1f}°C | "
+                      f"Consigne(avant_arrondi={cmdTemp_avant_arrondi:.3f}°C, après_arrondi={self.cmdTemp:.1f}°C, avant_update={cmdTemp_avant:.1f}°C)")
+            else:
+                # Si le point de rosée n'est pas disponible, garder la consigne actuelle
+                print(f"[CONSIGNE] {self.name}: Point de rosée indisponible (tempRosee={tempRosee:.3f}°C), conservation de cmdTemp={self.cmdTemp:.1f}°C")
 
     # Asserv Parameters
     def get_autoUpdateKpKiKd(self):
@@ -459,11 +582,16 @@ class AstraPwm():
         learning_rate = 0.00001
         lastpid_output=0
 
+        # Mettre à jour la consigne depuis le point de rosée AVANT de calculer l'erreur initiale
+        self.updateCmdTempfromTempRosee()
+        
         error = self.get_cmdTemp() - self.get_temp()
         integralNbVal = 10
-        integral = error * integralNbVal  # Valeur initiale de l'intégrale glissante
-        integralList = [error] * integralNbVal
-        prev_error = 0.0
+        # Initialiser l'intégrale à 0 pour éviter un pic au démarrage
+        # Elle se remplira progressivement avec les vraies valeurs d'erreur
+        integral = 0.0
+        integralList = [0.0] * integralNbVal
+        prev_error = error  # Initialiser prev_error avec l'erreur actuelle pour éviter un pic dérivé
 
         while self._running:
             self.updateCmdTempfromTempRosee()
@@ -489,7 +617,8 @@ class AstraPwm():
                 self.Kd = max(0, min(self.Kd, 100))
 
             pid_output = max(0, min(pid_output, 100))
-            #print("cmd=", self.get_cmdTemp(), "Temp=", self.get_temp(), f"pid={pid_output:.2f}   Kp={self.Kp:.3f} Ki={self.Ki:.3f} Kd={self.Kd:.3f} int:{integral:.1f}")
+            # Log PID pour debug
+            print(f"[PID] {self.name}: cmd={self.get_cmdTemp():.1f}°C, temp={self.get_temp():.1f}°C, error={error:.2f}°C, pid={pid_output:.1f}%, Kp={self.Kp:.3f}, Ki={self.Ki:.3f}, Kd={self.Kd:.3f}, integral={integral:.1f}")
             self.set_ratio(pid_output)
             time.sleep(step_time)
         self.set_ratio(0)
@@ -525,6 +654,12 @@ class AstraPwm():
                 self.Kp = variables_dict["Kp"]
                 self.Ki = variables_dict["Ki"]
                 self.Kd = variables_dict["Kd"]
+            # Charger l'état de l'auto-calcul PID (par défaut False si absent)
+            if "autoUpdateKpKiKd" in variables_dict:
+                self.autoUpdateKpKiKd = variables_dict["autoUpdateKpKiKd"]
+            else:
+                # Si absent, utiliser la valeur par défaut (False)
+                self.autoUpdateKpKiKd = False
             if "tempname" in variables_dict:
                 saved_tempname = variables_dict["tempname"]
                 print(f"[DEBUG AstraPwm.load] {self.name}: tempname trouvé dans sauvegarde = '{saved_tempname}', tempname actuel = '{self.tempname}'")
@@ -593,6 +728,7 @@ class AstraPwm():
                 "Kp":self.Kp,
                 "Ki":self.Ki,
                 "Kd":self.Kd,
+                "autoUpdateKpKiKd":self.autoUpdateKpKiKd,
                 }
         chemin_complet=Path.home() / ".AstrAlim"
         chemin_complet.mkdir(parents=True, exist_ok=True)
