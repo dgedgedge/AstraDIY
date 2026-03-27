@@ -34,7 +34,7 @@ for FILE in Astra*.py ina219.py syspwm.py bme280_lib.py survDateOffset.py
 do
 	cp ${HOMEDIR}/pythonDrivers/${FILE} $INSTALLDIR
 done
-cp -r ${HOMEDIR}/pythonDrivers/lib $INSTALLDIR/pythonDrivers
+cp -r ${HOMEDIR}/pythonDrivers/lib $INSTALLDIR/
 chmod a+rx  $INSTALLDIR/Astra*.py
 chmod og-w $INSTALLDIR/Astra*.py
 
