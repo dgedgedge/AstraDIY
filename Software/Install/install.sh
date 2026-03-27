@@ -1,12 +1,12 @@
 #!/bin/env bash
-FILESOURCE=$(dirname $0)
+FILESOURCE=$(readlink -f $(dirname $0))
 
 sudo ${FILESOURCE}/install_gps.sh
 sudo ${FILESOURCE}/install_scripts.sh
 sudo ${FILESOURCE}/install_bootConfig.sh
 ${FILESOURCE}/install_autostart.sh
 
-# Installation du fichier .desktop pour les drivers INDI sur le bureau
+# Installation du fichier .desktop poreadlink -fur les drivers INDI sur le bureau
 echo "Installation du raccourci d'installation des drivers INDI sur le bureau..."
 INDI_DRIVER_DIR="${FILESOURCE}/../indiDriver"
 INDI_DESKTOP_SOURCE="${INDI_DRIVER_DIR}/Install_INDIAstrAlim.desktop"
