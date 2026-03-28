@@ -49,7 +49,7 @@ Avant de commencer, assurez-vous d'avoir :
    ```bash
    # Si vous utilisez git :
    cd ~
-   git clone -b V2 https://github.com/dgedgedge/AstraDIY.git AstraDIY
+   git clone https://github.com/dgedgedge/AstraDIY.git AstraDIY
    cd AstraDIY
    
    # Ou téléchargez et décompressez l'archive dans un répertoire
