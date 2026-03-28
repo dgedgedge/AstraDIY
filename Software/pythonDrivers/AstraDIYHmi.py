@@ -35,11 +35,9 @@ class MainWindow(QMainWindow):
         # Window settings
         self.setWindowTitle('Astralim Panneau de Contrôle')
         
-        # Définir une taille minimale pour la fenêtre
-        self.setMinimumSize(1000, 700)
-        
-        # Taille par défaut
-        self.resize(1400, 900)
+        # Auto-size based on child widgets
+        self.adjustSize()
+        self.setMinimumSize(self.sizeHint())
 
     def closeEvent(self, event):
         # Arrêter proprement tous les composants des fenêtres enfants
