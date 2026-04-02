@@ -129,7 +129,7 @@ class AlimentationControl(AlimentationRow):
         self.update_common(self.ina)
     
     def getTotalEnergieWh(self):
-        return self.ina.getTotalEnergiemWS()/3600.0/1000.0
+        return self.ina.energiemWS()/3600.0/1000.0
 
     def updateUI(self):
         self.toggle.updateUI()
@@ -170,7 +170,7 @@ class AlimentationPwmControl(AlimentationRow):
         self.status_led.setStyleSheet(f"color: {color}; font-size: 14px;")
     
     def getTotalEnergieWh(self):
-        return self.ina.getTotalEnergiemWS()/3600.0/1000.0
+        return self.ina.energiemWS()/3600.0/1000.0
 
     def updateUI(self):
         self.update_monitoring()

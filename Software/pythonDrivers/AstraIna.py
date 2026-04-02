@@ -2,93 +2,12 @@
 # GPIO used PA17
 import logging
 from lib.ina219 import INA219
-import threading
 import time
+from lib.astra_com_fetcher import AstraComFetcher
+from lib.astra_com_device import AstraComDevice
 
 
-class AstraInaFetcher(threading.Thread):
-    _AstraInaFetcher=None
-
-    def __init__(self):
-        super().__init__()
-        self.running = True
-        self.listInalock = threading.Lock()
-        self.listIna:list = []
-        self.totalEnergiemWS:float=0
-
-    @classmethod
-    def get_instance(cls):
-        if cls._AstraInaFetcher is None:
-            cls._AstraInaFetcher = AstraInaFetcher()
-            cls._AstraInaFetcher.start()
-        return cls._AstraInaFetcher
-
-    @classmethod
-    def exitAll(cls):
-        if not(cls._AstraInaFetcher is None):
-            cls._AstraInaFetcher.stop()
-
-
-    def run(self):
-        debug_counter = 0
-        while self.running:
-            ina:AstraIna=None
-            time.sleep(0.4)
-            try:
-                with self.listInalock:
-                    totalEnergiemWS:float=0.0
-                    # Debug périodique pour voir quels INA sont dans la liste
-                    debug_counter += 1
-                    if debug_counter % 25 == 0:  # Toutes les ~10 secondes
-                        ina_names = [ina.getName() for ina in self.listIna]
-                        print(f"[DEBUG AstraInaFetcher.run] INA dans la liste ({len(self.listIna)}): {ina_names}")
-                    
-                    for ina in self.listIna:
-                        try:
-                            ina.sendConfiguration()
-                            time.sleep(0.005)  # Délai entre chaque configuration I2C pour éviter les conflits
-                        except Exception as e:
-                            # Logger les erreurs pour les PWM
-                            if "Pwm" in ina.getName():
-                                print(f"[DEBUG AstraInaFetcher.run] ERREUR sendConfiguration pour {ina.getName()}: {e}")
-                            pass
-                    
-                    time.sleep(0.1)  # Délai entre configuration et lecture
-
-                    for ina in self.listIna:
-                        try:
-                            ina.getDataFromIna()
-                            totalEnergiemWS+=ina.energiemWS()
-                            time.sleep(0.005)  # Délai entre chaque lecture I2C pour éviter les conflits
-                        except Exception as e:
-                            # Logger les erreurs pour les PWM
-                            if "Pwm" in ina.getName():
-                                print(f"[DEBUG AstraInaFetcher.run] ERREUR getDataFromIna pour {ina.getName()}: {e}")
-                            pass
-                    self.totalEnergiemWS=totalEnergiemWS
-            except Exception as e:
-                # En cas d'erreur générale, continuer la boucle
-                print(f"[DEBUG AstraInaFetcher.run] ERREUR GÉNÉRALE: {e}")
-                time.sleep(0.5)
-                pass
-
-    def stop(self):
-        self.running=False
-        self.join()
-        AstraIna._AstraInaFetcher=None
-
-    def setIna(self, ina):
-        with self.listInalock:
-            self.listIna.append(ina)
-
-    def getTotalEnergiemWS(self)->float:
-        """
-        Return the sum of INA energie measurements in mWs.
-        """
-        return self.totalEnergiemWS
-
-
-class AstraIna:
+class AstraIna(AstraComDevice):
     RANGE_16V = INA219.RANGE_16V  # Range 0-16 volts
     RANGE_32V = INA219.RANGE_32V  # Range 0-32 volts
 
@@ -114,19 +33,19 @@ class AstraIna:
     ina219_set = {
             "AstraDc1": {"ispwm":False, "busnum":1, "address": 0x41, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 37,
                          "force_abs_current_power": True,
-                         "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
+                         "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT },
             "AstraDc2": {"ispwm":False, "busnum":1, "address": 0x44, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 38,
                          "force_abs_current_power": True,
-                         "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
+                         "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT },
             "AstraDc3": {"ispwm":False, "busnum":1, "address": 0x46, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 40,
                          "force_abs_current_power": True,
-                         "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
+                         "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT },
             "AstraPwm1": {"ispwm":True, "busnum":1, "address": 0x49, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":None, "pwm":1, 
-                         "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
+                         "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT },
             "AstraPwm2": {"ispwm":True, "busnum":1, "address": 0x4d, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":None, "pwm":2, 
-                         "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP },
-            "AstOnStep": {"ispwm":True, "busnum":1, "address": 0x40, "shunt_ohms": 0.005, "max_expected_amps": 6, "chip":None, "pwm":2, 
-                         "bus_adc":INA219.ADC_128SAMP, "shunt_adc":INA219.ADC_128SAMP }
+                         "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT },
+            "AstOnStep": {"ispwm":False, "busnum":1, "address": 0x40, "shunt_ohms": 0.005, "max_expected_amps": 6, "chip":None, "pwm":2, 
+                         "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT }
     }
 
     @classmethod
@@ -135,9 +54,15 @@ class AstraIna:
 
     @classmethod
     def exitAll(cls):
-        AstraInaFetcher.exitAll()
+        AstraComFetcher.exitAll()
 
     def __init__(self, shunt_ohms=-1, max_expected_amps=-1, busnum=-1, address=-1, name="", log_level=logging.ERROR):
+        eachStep = False
+        if name != "" and name in self.ina219_set:
+            eachStep = bool(self.ina219_set[name].get("ispwm", False))
+
+        self.eachStep: bool = eachStep
+        self.ispwm: bool = eachStep
         self.configured:bool=False
         self.configurationSend:bool=False
 
@@ -150,10 +75,7 @@ class AstraIna:
         self.shunt_adc=-1
                  
         # Last collection
-        self.firstPing=True
         self.pingOk=True
-        self._lasttimeS:float=0.0
-        self._firsttime:float=0.0
         self._intPeriodS:float=0.0
 
         self._voltageV:float=0.0
@@ -161,16 +83,25 @@ class AstraIna:
         self._currentmA:float=0.0
         self._powermW:float=0.0
         self._energiemWS:float=0.0
+
+        self._publishedVoltageV: float = 0.0
+        self._publishedShuntVoltagemV: float = 0.0
+        self._publishedCurrentmA: float = 0.0
+        self._publishedPowermW: float = 0.0
+
+        self._cycleVoltageSumV: float = 0.0
+        self._cycleShuntVoltageSummV: float = 0.0
+        self._cycleCurrentSummA: float = 0.0
+        self._cyclePowerSummW: float = 0.0
+        self._cycleSampleCount: int = 0
     
         self.ina219:INA219= None
-        self.AstraInaFetcher:AstraInaFetcher=None
 
         if self.name == "":
             if shunt_ohms==-1 or max_expected_amps==-1 or busnum==-1 or address==-1:
                 raise Exception("If name notspecified call AstraIna(shunt_ohms, max_expected_amps, busnum, address")
             # Temp fetcher
             self.ina219 = INA219(shunt_ohms=shunt_ohms, max_expected_amps=max_expected_amps, busnum=busnum, address=address, log_level=log_level)
-            self.AstraInaFetcher = AstraInaFetcher.get_instance()
         else:
             if self.name in self.ina219_set:
                 self.caract=self.ina219_set[self.name]  # Utiliser self.name au lieu de name pour cohérence
@@ -183,19 +114,18 @@ class AstraIna:
                     busnum=self.caract["busnum"], 
                     address=self.address, 
                     log_level=log_level)
-                # Temp fetcher
-                self.AstraInaFetcher = AstraInaFetcher.get_instance()
                 self.configure(bus_adc=self.caract["bus_adc"], shunt_adc=self.caract["shunt_adc"])
                 print(f"[DEBUG AstraIna.__init__] {self.name}: INA219 créé et configuré, address=0x{self.address:x}")
             else:
                 raise Exception("Unkown AstraIna")
+        super().__init__(name=name, eachStep=eachStep)
 
-    def sendConfiguration(self):
+    def startMeasurement(self, step: int, integrationDurationS: float) -> None:
         """
         As the INA may loose it's configuration, it is necessary to:
         1- Check if the ina is present.
         2- Send the configuration if it is present.
-        Collect of the data shall be done through getDataFromIna 
+        Collect of the data shall be done through getMeasurement
         The method is not threadsafe and shall be called by a uniq thread.
         """
         pingOk=False
@@ -203,10 +133,6 @@ class AstraIna:
         try:
             if self.ina219.ping():
                 pingOk=True
-                if self.firstPing:
-                    self.firstPing=False
-                    self._lasttimeS = time.perf_counter()
-                    self.firstttime= time.perf_counter()
             if pingOk:
                 try:
                     self.ina219.configure(
@@ -226,7 +152,7 @@ class AstraIna:
                             self._ping_error_counter = 0
                         self._ping_error_counter += 1
                         if self._ping_error_counter % 10 == 0:  # Logger toutes les 10 erreurs
-                            print(f"[DEBUG sendConfiguration] {self.name}: ERREUR I2C configure - {e}")
+                            print(f"[DEBUG startMeasurement] {self.name}: ERREUR I2C configure - {e}")
         except (OSError, IOError) as e:
             # Erreur I2C lors du ping
             self.pingOk = False
@@ -236,7 +162,7 @@ class AstraIna:
                     self._ping_error_counter = 0
                 self._ping_error_counter += 1
                 if self._ping_error_counter % 10 == 0:  # Logger toutes les 10 erreurs
-                    print(f"[DEBUG sendConfiguration] {self.name}: ERREUR I2C ping - {e}")
+                        print(f"[DEBUG startMeasurement] {self.name}: ERREUR I2C ping - {e}")
             pass            
         
     def getPingOK(self)->bool:
@@ -245,10 +171,10 @@ class AstraIna:
         """
         return self.pingOk
     
-    def getDataFromIna(self):
+    def getMeasurement(self, step: int, integrationDurationS: float) -> None:
         """
         Do the INA iteraction.
-        The user shall have called sendConfiguration each time before calling this method.
+        The user shall have called startMeasurement each time before calling this method.
         Collects measures of the INA for publication.
         The method is not threadsafe and shall be called by a uniq thread.
         It is considered that the last measure OK is cummulated in the energy.
@@ -260,12 +186,11 @@ class AstraIna:
                     self._config_false_counter = 0
                 self._config_false_counter += 1
                 if self._config_false_counter % 25 == 0:  # Logger toutes les 25 fois (~10 secondes)
-                    print(f"[DEBUG getDataFromIna] {self.name}: configurationSend=False, pingOK={self.pingOk} - lecture ignorée")
+                    print(f"[DEBUG getData] {self.name}: configurationSend=False, pingOK={self.pingOk} - lecture ignorée")
             return
         
         try:
-            curtimeS=time.perf_counter()
-            deltatimeS=curtimeS-self._lasttimeS
+            deltatimeS = integrationDurationS
             if not self.ina219.current_overflow():
                 # Lire les valeurs brutes AVANT le max(..., 0.0) pour voir les valeurs négatives potentielles
                 raw_shunt_mV = self.ina219.shunt_voltage()
@@ -294,15 +219,15 @@ class AstraIna:
 
                 self._shuntVoltagemV = raw_shunt_mV
                 self._voltageV = max(raw_voltage_V, 0.0)
+                self._accumulateCycleAndPublish(step)
                 
-                # Debug détaillé pour les PWM (toutes les 25 lectures environ)
-                if "Pwm" in self.name:
-                    if not hasattr(self, '_debug_counter'):
-                        self._debug_counter = 0
-                    self._debug_counter += 1
-                    if self._debug_counter % 25 == 0:
-                        print(f"[DEBUG getDataFromIna] {self.name}: RAW (après inversion si Pwm1) - shunt={raw_shunt_mV:.3f}mV, V={raw_voltage_V:.3f}V, I={raw_current_mA:.3f}mA, P={raw_power_mW:.3f}mW")
-                        print(f"[DEBUG getDataFromIna] {self.name}: AFTER max(0) - shunt={self._shuntVoltagemV:.3f}mV, V={self._voltageV:.3f}V, I={self._currentmA:.3f}mA, P={self._powermW:.3f}mW, overflow={self.ina219.current_overflow()}")
+                # Debug détaillé pour les INA (toutes les 25 lectures environ)
+                if not hasattr(self, '_debug_counter'):
+                    self._debug_counter = 0
+                self._debug_counter += 1
+                if self._debug_counter % 25 == 0:
+                    print(f"[DEBUG getData] {self.name}: RAW (après inversion si Pwm1) - shunt={raw_shunt_mV:.3f}mV, V={raw_voltage_V:.3f}V, I={raw_current_mA:.3f}mA, P={raw_power_mW:.3f}mW")
+                    print(f"[DEBUG getData] {self.name}: AFTER max(0) - shunt={self._shuntVoltagemV:.3f}mV, V={self._voltageV:.3f}V, I={self._currentmA:.3f}mA, P={self._powermW:.3f}mW, overflow={self.ina219.current_overflow()}")
             else:
                 # Logger si overflow
                 if "Pwm" in self.name:
@@ -310,11 +235,10 @@ class AstraIna:
                         self._overflow_counter = 0
                     self._overflow_counter += 1
                     if self._overflow_counter % 10 == 0:
-                        print(f"[DEBUG getDataFromIna] {self.name}: CURRENT OVERFLOW détecté")
+                        print(f"[DEBUG getData] {self.name}: CURRENT OVERFLOW détecté")
             energiemWS=self._powermW * deltatimeS
             self._energiemWS += energiemWS
-            self._lasttimeS=curtimeS
-            self._intPeriodS=curtimeS-self.firstttime
+            self._intPeriodS += deltatimeS
             self.pingOk = True
         except (OSError, IOError) as e:
             # Erreur I2C - le capteur peut être temporairement indisponible
@@ -325,8 +249,50 @@ class AstraIna:
                     self._read_error_counter = 0
                 self._read_error_counter += 1
                 if self._read_error_counter % 10 == 0:  # Logger toutes les 10 erreurs
-                    print(f"[DEBUG getDataFromIna] {self.name}: ERREUR I2C lecture - {e}")
+                    print(f"[DEBUG getData] {self.name}: ERREUR I2C lecture - {e}")
             pass
+
+    def _resetCycleAccumulators(self) -> None:
+        """Reset per-cycle accumulators."""
+        self._cycleVoltageSumV = 0.0
+        self._cycleShuntVoltageSummV = 0.0
+        self._cycleCurrentSummA = 0.0
+        self._cyclePowerSummW = 0.0
+        self._cycleSampleCount = 0
+
+    def _publishCurrentCycleAverage(self) -> None:
+        """Publish averages computed from the current cycle accumulators."""
+        if self._cycleSampleCount <= 0:
+            return
+
+        self._publishedVoltageV = self._cycleVoltageSumV / self._cycleSampleCount
+        self._publishedShuntVoltagemV = self._cycleShuntVoltageSummV / self._cycleSampleCount
+        self._publishedCurrentmA = self._cycleCurrentSummA / self._cycleSampleCount
+        self._publishedPowermW = self._cyclePowerSummW / self._cycleSampleCount
+
+    def _accumulateCycleAndPublish(self, step: int) -> None:
+        """Accumulate on each-step devices, publish immediately on non-each-step devices."""
+        if not self.eachStep:
+            self._publishedVoltageV = self._voltageV
+            self._publishedShuntVoltagemV = self._shuntVoltagemV
+            self._publishedCurrentmA = self._currentmA
+            self._publishedPowermW = self._powermW
+            return
+
+        if step == 0 and self._cycleSampleCount > 0:
+            self._publishCurrentCycleAverage()
+            self._resetCycleAccumulators()
+
+        self._cycleVoltageSumV += self._voltageV
+        self._cycleShuntVoltageSummV += self._shuntVoltagemV
+        self._cycleCurrentSummA += self._currentmA
+        self._cyclePowerSummW += self._powermW
+        self._cycleSampleCount += 1
+
+    def onCycleConfigurationChanged(self, periodS: float, stepCount: int) -> None:
+        """Update local cycle config and reset cycle averaging state."""
+        super().onCycleConfigurationChanged(periodS, stepCount)
+        self._resetCycleAccumulators()
     
     def configure(self, voltage_range=INA219.RANGE_16V, gain=INA219.GAIN_AUTO, bus_adc=INA219.ADC_12BIT, shunt_adc=INA219.ADC_12BIT):
         if self.configured:
@@ -336,10 +302,16 @@ class AstraIna:
             self.gain=gain
             self.bus_adc=bus_adc
             self.shunt_adc=shunt_adc
-            print(f"[DEBUG AstraIna.configure] {self.name}: Ajout au fetcher (address=0x{self.address:x})")
-            self.AstraInaFetcher.setIna(self)
             self.configured=True
-            print(f"[DEBUG AstraIna.configure] {self.name}: Configuré et ajouté au fetcher")
+            print(f"[DEBUG AstraIna.configure] {self.name}: Configuré")
+
+    def __str__(self) -> str:
+        displayName = self.name if self.name != "" else self.__class__.__name__
+        addressText = f"0x{self.address:02x}" if self.address >= 0 else "N/A"
+        return f"{displayName} address={addressText} ispwm={self.ispwm}"
+
+    def __format__(self, formatSpec: str) -> str:
+        return format(str(self), formatSpec)
 
     
     def getName(self)->str:
@@ -352,43 +324,43 @@ class AstraIna:
         """
         Return the last seen bus voltage in volts.
         """
-        return self._voltageV
+        return self._publishedVoltageV
 
     def shuntVoltagemV(self)->float:
         """
         Return the last seen shunt voltage in millivolts.
         """
-        return self._shuntVoltagemV
+        return self._publishedShuntVoltagemV
 
     def shuntVoltageV(self)->float:
         """
         Return the last seen shunt voltage in millivolts.
         """
-        return self._shuntVoltagemV / 1000
+        return self.shuntVoltagemV() / 1000.0
     
     def currentmA(self)->float:
         """
         Return the bus current in milliamps.
         """
-        return self._currentmA
+        return self._publishedCurrentmA
 
     def currentA(self)->float:
         """
         Return the bus current in Amps.
         """
-        return (self._currentmA/1000.0)
+        return (self.currentmA() / 1000.0)
     
     def powermW(self)->float:
         """
         Return the bus power consumption in milliwatts.
         """
-        return self._powermW
+        return self._publishedPowermW
 
     def powerW(self)->float:
         """
         Return the bus power consumption in Watts.
         """
-        return (self._powermW/1000.0)
+        return (self.powermW() / 1000.0)
     
     def energiemWS(self)->float:
         """ 
@@ -404,13 +376,27 @@ class AstraIna:
         
     def intPeriodS(self)->float:
         return self._intPeriodS
-    
-    def getTotalEnergiemWS(self)->float:
+
+    def getInfo(self) -> dict:
         """
-        Return the sum of INA energie measurements in mWs.
+        Retourne un snapshot des dernières valeurs publiées (sans accès I2C).
+
+        Returns:
+            dict avec name, address, pingOk, voltageV, shuntVoltagemV,
+            currentmA, powermW, energiemWS, intPeriodS.
         """
-        return self.AstraInaFetcher.getTotalEnergiemWS()
-    
+        return {
+            "name": self.name,
+            "address": self.address,
+            "pingOk": self.pingOk,
+            "voltageV": self._publishedVoltageV,
+            "shuntVoltagemV": self._publishedShuntVoltagemV,
+            "currentmA": self._publishedCurrentmA,
+            "powermW": self._publishedPowermW,
+            "energiemWS": self._energiemWS,
+            "intPeriodS": self._intPeriodS,
+        }
+
     def getDiagnosticInfo(self)->dict:
         """
         Retourne des informations de diagnostic pour déboguer les mesures.
@@ -461,6 +447,7 @@ class AstraIna:
                 return {"error": str(e), "ping": ping_ok}
         except Exception as e:
             return {"error": str(e)}    
+            
     
 if __name__ == "__main__":
     import signal
@@ -486,7 +473,7 @@ if __name__ == "__main__":
             # mWs / 3600 = mWh, puis mWh / tension_V = mAh
             # Pour l'exemple, on utilise 12V comme tension de référence
             tension_ref_V = 12.0
-            total_mWh = ina219.getTotalEnergiemWS() / 3600.0
+            total_mWh = sum(ina.energiemWS() for ina in listIna) / 3600.0
             total_mAh = total_mWh / tension_ref_V
             print(f"Energie={total_mAh:.3f} mAh (sous {tension_ref_V}V, {total_mWh:.3f} mWh)")
             print("===============================================================")

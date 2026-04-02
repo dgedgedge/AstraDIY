@@ -1,173 +1,299 @@
-#!/usr/bin/python
-#--------------------------------------
-#    ___  ___  _ ____
-#   / _ \/ _ \(_) __/__  __ __
-#  / , _/ ___/ /\ \/ _ \/ // /
-# /_/|_/_/  /_/___/ .__/\_, /
-#                /_/   /___/
-#
-#           bme280.py
-#  Read data from a digital pressure sensor.
-#
-#  Official datasheet available from :
-#  https://www.bosch-sensortec.com/bst/products/all_products/bme280
-#
-# Author : Matt Hawkins
-# Date   : 21/01/2018
-#
-# https://www.raspberrypi-spy.co.uk/
-#
-#--------------------------------------
-import smbus
+#!/usr/bin/env python3
+
+"""Lecture du capteur BME280 via I2C."""
+
 import time
 from ctypes import c_short
-from ctypes import c_byte
-from ctypes import c_ubyte
+from typing import Optional, Sequence, Tuple
 
-DEVICE = 0x76 # Default device I2C address
+try:
+  import smbus  # type: ignore[import-not-found]
+except ImportError:
+  smbus = None
 
 
-bus = smbus.SMBus(1) # Rev 2 Pi, Pi 2 & Pi 3 uses bus 1
-                     # Rev 1 Pi uses bus 0
+class BME280:
+  """Wrapper objet pour capteur BME280.
 
-def getShort(data, index):
-  # return two bytes from data as a signed 16-bit value
-  return c_short((data[index+1] << 8) + data[index]).value
+  Par defaut, le capteur est adresse en I2C sur 0x76.
+  """
 
-def getUShort(data, index):
-  # return two bytes from data as an unsigned 16-bit value
-  return (data[index+1] << 8) + data[index]
+  DEFAULT_DEVICE = 0x76
 
-def getChar(data,index):
-  # return one byte from data as a signed char
-  result = data[index]
-  if result > 127:
-    result -= 256
-  return result
+  def __init__(self, addr: int = DEFAULT_DEVICE, busId: int = 1) -> None:
+    """Initialise le capteur et ouvre le bus I2C.
 
-def getUChar(data,index):
-  # return one byte from data as an unsigned char
-  result =  data[index] & 0xFF
-  return result
+    Args:
+      addr: Adresse I2C du BME280.
+      busId: Numero du bus I2C (1 sur Raspberry Pi moderne).
+    """
+    if smbus is None:
+      raise RuntimeError("Le module python smbus est requis pour utiliser BME280")
 
-def readBME280ID(addr=DEVICE):
-  # Chip ID Register Address
-  REG_ID     = 0xD0
-  (chip_id, chip_version) = bus.read_i2c_block_data(addr, REG_ID, 2)
-  return (chip_id, chip_version)
+    self.addr = addr
+    self.busId = busId
+    self.bus = smbus.SMBus(busId)
 
-def readBME280All(addr=DEVICE):
-  # Register Addresses
-  REG_DATA = 0xF7
-  REG_CONTROL = 0xF4
-  REG_CONFIG  = 0xF5
+    self._calibrationLoaded = False
+    self._normalModeConfigured = False
+    self._normalModeWaitTimeS = 0.0
 
-  REG_CONTROL_HUM = 0xF2
-  REG_HUM_MSB = 0xFD
-  REG_HUM_LSB = 0xFE
+    self._digT1: int = 0
+    self._digT2: int = 0
+    self._digT3: int = 0
 
-  # Oversample setting - page 27
-  OVERSAMPLE_TEMP = 2
-  OVERSAMPLE_PRES = 2
-  MODE = 1
+    self._digP1: int = 0
+    self._digP2: int = 0
+    self._digP3: int = 0
+    self._digP4: int = 0
+    self._digP5: int = 0
+    self._digP6: int = 0
+    self._digP7: int = 0
+    self._digP8: int = 0
+    self._digP9: int = 0
 
-  # Oversample setting for humidity register - page 26
-  OVERSAMPLE_HUM = 2
-  bus.write_byte_data(addr, REG_CONTROL_HUM, OVERSAMPLE_HUM)
+    self._digH1: int = 0
+    self._digH2: int = 0
+    self._digH3: int = 0
+    self._digH4: int = 0
+    self._digH5: int = 0
+    self._digH6: int = 0
 
-  control = OVERSAMPLE_TEMP<<5 | OVERSAMPLE_PRES<<2 | MODE
-  bus.write_byte_data(addr, REG_CONTROL, control)
+  def getShort(self, data: Sequence[int], index: int) -> int:
+    """Retourne 2 octets signes (16 bits)."""
+    return c_short((data[index + 1] << 8) + data[index]).value
 
-  # Read blocks of calibration data from EEPROM
-  # See Page 22 data sheet
-  cal1 = bus.read_i2c_block_data(addr, 0x88, 24)
-  cal2 = bus.read_i2c_block_data(addr, 0xA1, 1)
-  cal3 = bus.read_i2c_block_data(addr, 0xE1, 7)
+  def getUShort(self, data: Sequence[int], index: int) -> int:
+    """Retourne 2 octets non signes (16 bits)."""
+    return (data[index + 1] << 8) + data[index]
 
-  # Convert byte data to word values
-  dig_T1 = getUShort(cal1, 0)
-  dig_T2 = getShort(cal1, 2)
-  dig_T3 = getShort(cal1, 4)
+  def getChar(self, data: Sequence[int], index: int) -> int:
+    """Retourne 1 octet signe."""
+    result = data[index]
+    if result > 127:
+      result -= 256
+    return result
 
-  dig_P1 = getUShort(cal1, 6)
-  dig_P2 = getShort(cal1, 8)
-  dig_P3 = getShort(cal1, 10)
-  dig_P4 = getShort(cal1, 12)
-  dig_P5 = getShort(cal1, 14)
-  dig_P6 = getShort(cal1, 16)
-  dig_P7 = getShort(cal1, 18)
-  dig_P8 = getShort(cal1, 20)
-  dig_P9 = getShort(cal1, 22)
+  def getUChar(self, data: Sequence[int], index: int) -> int:
+    """Retourne 1 octet non signe."""
+    return data[index] & 0xFF
 
-  dig_H1 = getUChar(cal2, 0)
-  dig_H2 = getShort(cal3, 0)
-  dig_H3 = getUChar(cal3, 2)
+  def readBME280ID(self, addr: Optional[int] = None) -> Tuple[int, int]:
+    """Lit l'identifiant du capteur.
 
-  dig_H4 = getChar(cal3, 3)
-  dig_H4 = (dig_H4 << 24) >> 20
-  dig_H4 = dig_H4 | (getChar(cal3, 4) & 0x0F)
+    Args:
+      addr: Adresse I2C optionnelle (sinon adresse de l'objet).
 
-  dig_H5 = getChar(cal3, 5)
-  dig_H5 = (dig_H5 << 24) >> 20
-  dig_H5 = dig_H5 | (getUChar(cal3, 4) >> 4 & 0x0F)
+    Returns:
+      Tuple (chipId, chipVersion).
+    """
+    regId = 0xD0
+    deviceAddr = self.addr if addr is None else addr
+    chipId, chipVersion = self.bus.read_i2c_block_data(deviceAddr, regId, 2)
+    return chipId, chipVersion
 
-  dig_H6 = getChar(cal3, 6)
+  def loadCalibrationData(self, addr: Optional[int] = None) -> None:
+    """Lit les coefficients de calibration depuis l'EEPROM du BME280.
 
-  # Wait in ms (Datasheet Appendix B: Measurement time and current calculation)
-  wait_time = 1.25 + (2.3 * OVERSAMPLE_TEMP) + ((2.3 * OVERSAMPLE_PRES) + 0.575) + ((2.3 * OVERSAMPLE_HUM)+0.575)
-  time.sleep(wait_time/1000)  # Wait the required time  
+    Les valeurs dig_* sont conservees dans des attributs de l'objet.
+    """
+    deviceAddr = self.addr if addr is None else addr
 
-  # Read temperature/pressure/humidity
-  data = bus.read_i2c_block_data(addr, REG_DATA, 8)
-  pres_raw = (data[0] << 12) | (data[1] << 4) | (data[2] >> 4)
-  temp_raw = (data[3] << 12) | (data[4] << 4) | (data[5] >> 4)
-  hum_raw = (data[6] << 8) | data[7]
+    cal1 = self.bus.read_i2c_block_data(deviceAddr, 0x88, 24)
+    cal2 = self.bus.read_i2c_block_data(deviceAddr, 0xA1, 1)
+    cal3 = self.bus.read_i2c_block_data(deviceAddr, 0xE1, 7)
 
-  #Refine temperature
-  var1 = ((((temp_raw>>3)-(dig_T1<<1)))*(dig_T2)) >> 11
-  var2 = (((((temp_raw>>4) - (dig_T1)) * ((temp_raw>>4) - (dig_T1))) >> 12) * (dig_T3)) >> 14
-  t_fine = var1+var2
-  temperature = float(((t_fine * 5) + 128) >> 8);
+    self._digT1 = self.getUShort(cal1, 0)
+    self._digT2 = self.getShort(cal1, 2)
+    self._digT3 = self.getShort(cal1, 4)
 
-  # Refine pressure and adjust for temperature
-  var1 = t_fine / 2.0 - 64000.0
-  var2 = var1 * var1 * dig_P6 / 32768.0
-  var2 = var2 + var1 * dig_P5 * 2.0
-  var2 = var2 / 4.0 + dig_P4 * 65536.0
-  var1 = (dig_P3 * var1 * var1 / 524288.0 + dig_P2 * var1) / 524288.0
-  var1 = (1.0 + var1 / 32768.0) * dig_P1
-  if var1 == 0:
-    pressure=0
-  else:
-    pressure = 1048576.0 - pres_raw
-    pressure = ((pressure - var2 / 4096.0) * 6250.0) / var1
-    var1 = dig_P9 * pressure * pressure / 2147483648.0
-    var2 = pressure * dig_P8 / 32768.0
-    pressure = pressure + (var1 + var2 + dig_P7) / 16.0
+    self._digP1 = self.getUShort(cal1, 6)
+    self._digP2 = self.getShort(cal1, 8)
+    self._digP3 = self.getShort(cal1, 10)
+    self._digP4 = self.getShort(cal1, 12)
+    self._digP5 = self.getShort(cal1, 14)
+    self._digP6 = self.getShort(cal1, 16)
+    self._digP7 = self.getShort(cal1, 18)
+    self._digP8 = self.getShort(cal1, 20)
+    self._digP9 = self.getShort(cal1, 22)
 
-  # Refine humidity
-  humidity = t_fine - 76800.0
-  humidity = (hum_raw - (dig_H4 * 64.0 + dig_H5 / 16384.0 * humidity)) * (dig_H2 / 65536.0 * (1.0 + dig_H6 / 67108864.0 * humidity * (1.0 + dig_H3 / 67108864.0 * humidity)))
-  humidity = humidity * (1.0 - dig_H1 * humidity / 524288.0)
-  if humidity > 100:
-    humidity = 100
-  elif humidity < 0:
-    humidity = 0
+    self._digH1 = self.getUChar(cal2, 0)
+    self._digH2 = self.getShort(cal3, 0)
+    self._digH3 = self.getUChar(cal3, 2)
 
-  return temperature/100.0,pressure/100.0,humidity
+    digH4 = self.getChar(cal3, 3)
+    digH4 = (digH4 << 24) >> 20
+    self._digH4 = digH4 | (self.getChar(cal3, 4) & 0x0F)
 
-def main():
+    digH5 = self.getChar(cal3, 5)
+    digH5 = (digH5 << 24) >> 20
+    self._digH5 = digH5 | (self.getUChar(cal3, 4) >> 4 & 0x0F)
 
-  (chip_id, chip_version) = readBME280ID()
-  print("Chip ID     :", chip_id)
-  print("Version     :", chip_version)
+    self._digH6 = self.getChar(cal3, 6)
+    self._calibrationLoaded = True
 
-  temperature,pressure,humidity = readBME280All()
+  def configureNormalMode(
+    self,
+    addr: Optional[int] = None,
+    oversampleTemp: int = 2,
+    oversamplePres: int = 2,
+    oversampleHum: int = 2,
+    standbyCode: int = 5,
+    filterCode: int = 0,
+  ) -> None:
+    """Configure le capteur en mode normal (acquisition continue).
 
-  print("Temperature : ", temperature, "C")
-  print("Pressure : ", pressure, "hPa")
-  print("Humidity : ", humidity, "%")
+    Conformement a la datasheet BME280:
+    1. ecriture de ctrl_hum (0xF2)
+    2. ecriture de config (0xF5)
+    3. ecriture de ctrl_meas (0xF4) avec mode=0b11 (normal)
+    """
+    deviceAddr = self.addr if addr is None else addr
 
-if __name__=="__main__":
-   main()
+    regControlHum = 0xF2
+    regConfig = 0xF5
+    regControlMeas = 0xF4
+    normalMode = 0x03
+
+    oversampleTemp = max(0, min(5, oversampleTemp))
+    oversamplePres = max(0, min(5, oversamplePres))
+    oversampleHum = max(0, min(5, oversampleHum))
+    standbyCode = max(0, min(7, standbyCode))
+    filterCode = max(0, min(4, filterCode))
+
+    self.bus.write_byte_data(deviceAddr, regControlHum, oversampleHum)
+
+    config = (standbyCode << 5) | (filterCode << 2)
+    self.bus.write_byte_data(deviceAddr, regConfig, config)
+
+    control = (oversampleTemp << 5) | (oversamplePres << 2) | normalMode
+    self.bus.write_byte_data(deviceAddr, regControlMeas, control)
+
+    waitTimeMs = (
+      1.25
+      + (2.3 * oversampleTemp)
+      + ((2.3 * oversamplePres) + 0.575)
+      + ((2.3 * oversampleHum) + 0.575)
+    )
+    self._normalModeWaitTimeS = waitTimeMs / 1000.0
+    self._normalModeConfigured = True
+    time.sleep(self._normalModeWaitTimeS)
+
+  def acquireDataNormalMode(self, addr: Optional[int] = None) -> Tuple[float, float, float]:
+    """Lit temperature (C), pression (hPa) et humidite (%) en mode normal."""
+    deviceAddr = self.addr if addr is None else addr
+
+    if not self._calibrationLoaded:
+      self.loadCalibrationData(deviceAddr)
+
+    if not self._normalModeConfigured:
+      self.configureNormalMode(deviceAddr)
+
+    regData = 0xF7
+    data = self.bus.read_i2c_block_data(deviceAddr, regData, 8)
+    presRaw = (data[0] << 12) | (data[1] << 4) | (data[2] >> 4)
+    tempRaw = (data[3] << 12) | (data[4] << 4) | (data[5] >> 4)
+    humRaw = (data[6] << 8) | data[7]
+
+    var1 = ((((tempRaw >> 3) - (self._digT1 << 1))) * self._digT2) >> 11
+    var2 = (((((tempRaw >> 4) - self._digT1) * ((tempRaw >> 4) - self._digT1)) >> 12) * self._digT3) >> 14
+    tFine = var1 + var2
+    temperature = float(((tFine * 5) + 128) >> 8)
+
+    var1p = tFine / 2.0 - 64000.0
+    var2p = var1p * var1p * self._digP6 / 32768.0
+    var2p = var2p + var1p * self._digP5 * 2.0
+    var2p = var2p / 4.0 + self._digP4 * 65536.0
+    var1p = (self._digP3 * var1p * var1p / 524288.0 + self._digP2 * var1p) / 524288.0
+    var1p = (1.0 + var1p / 32768.0) * self._digP1
+    if var1p == 0:
+      pressure = 0.0
+    else:
+      pressure = 1048576.0 - presRaw
+      pressure = ((pressure - var2p / 4096.0) * 6250.0) / var1p
+      var1p2 = self._digP9 * pressure * pressure / 2147483648.0
+      var2p2 = pressure * self._digP8 / 32768.0
+      pressure = pressure + (var1p2 + var2p2 + self._digP7) / 16.0
+
+    humidity = tFine - 76800.0
+    humidity = (
+      (humRaw - (self._digH4 * 64.0 + self._digH5 / 16384.0 * humidity))
+      * (
+        self._digH2
+        / 65536.0
+        * (1.0 + self._digH6 / 67108864.0 * humidity * (1.0 + self._digH3 / 67108864.0 * humidity))
+      )
+    )
+    humidity = humidity * (1.0 - self._digH1 * humidity / 524288.0)
+    if humidity > 100:
+      humidity = 100.0
+    elif humidity < 0:
+      humidity = 0.0
+
+    return temperature / 100.0, pressure / 100.0, humidity
+
+  def readBME280All(self, addr: Optional[int] = None) -> Tuple[float, float, float]:
+    """Compatibilite API historique: acquisition complete en mode normal."""
+    return self.acquireDataNormalMode(addr)
+
+
+_defaultSensor: Optional[BME280] = None
+
+
+def _getDefaultSensor() -> BME280:
+  """Retourne l'instance BME280 par defaut, creee a la demande."""
+  global _defaultSensor
+  if _defaultSensor is None:
+    _defaultSensor = BME280()
+  return _defaultSensor
+
+
+def getShort(data: Sequence[int], index: int) -> int:
+  """Compatibilite: helper module-level vers l'instance par defaut."""
+  return _getDefaultSensor().getShort(data, index)
+
+
+def getUShort(data: Sequence[int], index: int) -> int:
+  """Compatibilite: helper module-level vers l'instance par defaut."""
+  return _getDefaultSensor().getUShort(data, index)
+
+
+def getChar(data: Sequence[int], index: int) -> int:
+  """Compatibilite: helper module-level vers l'instance par defaut."""
+  return _getDefaultSensor().getChar(data, index)
+
+
+def getUChar(data: Sequence[int], index: int) -> int:
+  """Compatibilite: helper module-level vers l'instance par defaut."""
+  return _getDefaultSensor().getUChar(data, index)
+
+
+def readBME280ID(addr: int = BME280.DEFAULT_DEVICE) -> Tuple[int, int]:
+  """Compatibilite: lecture ID avec API historique."""
+  return _getDefaultSensor().readBME280ID(addr)
+
+
+def readBME280All(addr: int = BME280.DEFAULT_DEVICE) -> Tuple[float, float, float]:
+  """Compatibilite: lecture complete avec API historique."""
+  return _getDefaultSensor().readBME280All(addr)
+
+
+def main() -> None:
+  """Petit test local de lecture capteur."""
+  sensor = _getDefaultSensor()
+  sensor.loadCalibrationData()
+  sensor.configureNormalMode()
+
+  chipId, chipVersion = sensor.readBME280ID()
+  print("Chip ID     :", chipId)
+  print("Version     :", chipVersion)
+
+  temperature, pressure, humidity = sensor.readBME280All()
+  print("Temperature :", temperature, "C")
+  print("Pressure    :", pressure, "hPa")
+  print("Humidity    :", humidity, "%")
+
+
+if __name__ == "__main__":
+  main()
 

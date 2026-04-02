@@ -30,7 +30,7 @@ then
 	rm -rf $INSTALLDIR
 fi
 mkdir -p $INSTALLDIR
-for FILE in Astra*.py ina219.py syspwm.py bme280_lib.py survDateOffset.py
+for FILE in Astra*.py survDateOffset.py
 do
 	cp ${HOMEDIR}/pythonDrivers/${FILE} $INSTALLDIR
 done

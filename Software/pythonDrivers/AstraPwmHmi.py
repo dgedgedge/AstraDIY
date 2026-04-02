@@ -406,11 +406,13 @@ class DrewControl(QWidget):
                 self.p_row_widget.setVisible(True)
                 self.c_row_widget.setVisible(False)
                 if self.AstraDrew.isAserv(): self.AstraDrew.stopAserv()
+                self.AstraDrew.unset_asservTempRosee()
                 self.buttonAsservOn = False; self.buttonRoseeConsigneOn = False
             elif mid == 1: # PID Fixe
                 print(f"[DEBUG on_mode_changed] {self.name}: Mode PID activé - vérification du capteur...")
                 self.p_row_widget.setVisible(False)
                 self.c_row_widget.setVisible(True)
+                self.AstraDrew.unset_asservTempRosee()
                 temp_sensor = self.AstraDrew.get_associateTemp()
                 print(f"[DEBUG on_mode_changed] {self.name}: temp_sensor='{temp_sensor}' (type={type(temp_sensor)})")
                 print(f"[DEBUG on_mode_changed] {self.name}: not temp_sensor={not temp_sensor}, ==''={temp_sensor == ''}, =='Unset Temp Sensor'={temp_sensor == 'Unset Temp Sensor'}")
