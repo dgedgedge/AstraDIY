@@ -13,15 +13,339 @@ from AstraPwm import AstraPwm
 from AstraCommonHmi import dataMenu, AnimatedToggleButton
 
 
-class PIDConfigDialogShared(QDialog):
-    def __init__(self, parent, widgets):
+class UnifiedChannelConfigDialog(QDialog):
+    """Fenêtre unifiée pour configurer l'assignation des capteurs et les paramètres PID d'une voie."""
+    def __init__(self, parent, widget):
         super().__init__(parent)
-        self.widgets = widgets
-        self.reference_astra_drew = widgets[0].AstraDrew if widgets else None
+        self.widget = widget
+        self.reference_astra_drew = widget.AstraDrew if widget else None
+        self.channelName = widget.display_name if widget else "RCA"
         self.initUI()
     
     def initUI(self):
-        self.setWindowTitle("Réglages PID")
+        self.setWindowTitle(f"Configuration - {self.channelName}")
+        self.setModal(True)
+        self.setMinimumWidth(450)
+        self.setMinimumHeight(700)
+        self.setStyleSheet("""
+            QDialog { 
+                background-color: #0f172a; 
+                border: 1px solid #334155;
+            }
+            QLabel { color: #94a3b8; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+            QDoubleSpinBox, QComboBox { 
+                background-color: #1e293b; 
+                color: #f8fafc; 
+                border: 1px solid #334155; 
+                padding: 8px; 
+                border-radius: 6px; 
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QDoubleSpinBox:disabled, QComboBox:disabled { 
+                background-color: #0f172a; 
+                color: #475569; 
+                border: 1px solid #1e293b; 
+            }
+            QPushButton#action { 
+                padding: 10px; 
+                border-radius: 6px; 
+                font-weight: 800; 
+                font-size: 11px;
+                text-transform: uppercase;
+            }
+            QGroupBox {
+                color: #f8fafc;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding-top: 8px;
+                font-weight: 700;
+                font-size: 11px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 3px 0 3px;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(20)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        title = QLabel(f"Configuration Complète - {self.channelName}")
+        title.setStyleSheet("font-size: 20px; font-weight: 900; color: #f8fafc; text-transform: none; letter-spacing: 0px;")
+        layout.addWidget(title)
+        
+        # =========== SECTION CAPTEURS ===========
+        sensors_group = QGroupBox("1. ASSIGNATION DES CAPTEURS")
+        sensors_group.setStyleSheet("""
+            QGroupBox {
+                color: #38bdf8;
+                border: 1px solid #0ea5e9;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding-top: 10px;
+                font-weight: 700;
+                font-size: 11px;
+            }
+        """)
+        sensors_layout = QVBoxLayout(sensors_group)
+        sensors_layout.setSpacing(12)
+        
+        available_sensors = self.reference_astra_drew.get_listTemp() if self.reference_astra_drew else []
+        
+        lbl = QLabel(f"Capteur de température pour {self.channelName}")
+        lbl.setStyleSheet("color: #94a3b8; font-weight: 700; font-size: 10px; text-transform: uppercase;")
+        
+        self.sensor_combo = QComboBox()
+        self.sensor_combo.addItem("— Aucun capteur assigné")
+        for s in available_sensors:
+            self.sensor_combo.addItem(s)
+        
+        curr = self.reference_astra_drew.get_associateTemp() if self.reference_astra_drew else None
+        if curr:
+            idx_found = self.sensor_combo.findText(curr)
+            if idx_found >= 0:
+                self.sensor_combo.setCurrentIndex(idx_found)
+            else:
+                self.sensor_combo.addItem(curr)
+                self.sensor_combo.setCurrentIndex(self.sensor_combo.count() - 1)
+        
+        sensors_layout.addWidget(lbl)
+        sensors_layout.addWidget(self.sensor_combo)
+        layout.addWidget(sensors_group)
+        
+        # =========== SECTION PID ===========
+        pid_group = QGroupBox("2. PARAMÈTRES PID")
+        pid_group.setStyleSheet("""
+            QGroupBox {
+                color: #f59e0b;
+                border: 1px solid #fbbf24;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding-top: 10px;
+                font-weight: 700;
+                font-size: 11px;
+            }
+        """)
+        pid_layout = QVBoxLayout(pid_group)
+        pid_layout.setSpacing(15)
+        
+        form = QFormLayout()
+        form.setSpacing(15)
+        form.setLabelAlignment(Qt.AlignLeft)
+        
+        pidAlgorithmHelp = (
+            "<b>Algorithme PID (simplifié)</b><br>"
+            "Commande = Kp × erreur + Ki × somme(erreurs) + Kd × variation(erreur)<br><br>"
+            "<b>Erreur</b> = Consigne - Température mesurée."
+        )
+        
+        dewPointMarginHelp = (
+            "<b>Marge au point de rosée</b><br>"
+            "Cette valeur fixe de combien de degrés l'équipement doit rester au-dessus "
+            "du point de rosée pour éviter la condensation.<br><br>"
+            "La consigne automatique est calculée ainsi :<br>"
+            "<b>Consigne = Point de rosée + marge</b><br><br>"
+            "Le Kp par défaut est dérivé de cette marge pour obtenir 100 % de chauffe "
+            "lorsque l'erreur est suppérieur à cette marge :<br>"
+            "<b>Kp_défaut = 100 / marge</b><br><br>"
+            "Exemple : avec une marge de 2.0°C, le Kp par défaut vaut 50."
+        )
+        
+        kpHelp = "<b>Kp - Proportionnel</b><br>" + pidAlgorithmHelp + "<br>Réagit immédiatement à l'erreur actuelle."
+        kiHelp = "<b>Ki - Intégral</b><br>" + pidAlgorithmHelp + "<br>Cumule les erreurs dans le temps."
+        kdHelp = "<b>Kd - Dérivé</b><br>" + pidAlgorithmHelp + "<br>Anticipe la tendance de l'erreur."
+        
+        def create_spin():
+            s = QDoubleSpinBox()
+            s.setRange(0.0, 100.0)
+            s.setDecimals(3)
+            return s
+        
+        self.kp_spin = create_spin()
+        if self.reference_astra_drew:
+            self.kp_spin.setValue(self.reference_astra_drew.get_Kp())
+        
+        self.ki_spin = create_spin()
+        if self.reference_astra_drew:
+            self.ki_spin.setValue(self.reference_astra_drew.get_Ki())
+        
+        self.kd_spin = create_spin()
+        if self.reference_astra_drew:
+            self.kd_spin.setValue(self.reference_astra_drew.get_Kd())
+        
+        self.dew_margin_spin = create_spin()
+        self.dew_margin_spin.setRange(0.1, 20.0)
+        self.dew_margin_spin.setDecimals(2)
+        if self.reference_astra_drew:
+            self.dew_margin_spin.setValue(self.reference_astra_drew.get_deltaTempRosee())
+        self.dew_margin_spin.valueChanged.connect(self.onDewPointMarginChanged)
+        self.dew_margin_spin.valueChanged.connect(self.updateDefaultKpExplanation)
+        
+        kpLabel = QLabel("Kp (Proportionnel)")
+        kpLabel.setToolTip(kpHelp)
+        kpLabel.setCursor(Qt.WhatsThisCursor)
+        
+        kiLabel = QLabel("Ki (Intégral)")
+        kiLabel.setToolTip(kiHelp)
+        kiLabel.setCursor(Qt.WhatsThisCursor)
+        
+        kdLabel = QLabel("Kd (Dérivé)")
+        kdLabel.setToolTip(kdHelp)
+        kdLabel.setCursor(Qt.WhatsThisCursor)
+        
+        dewMarginLabel = QLabel("Marge Rosée")
+        dewMarginLabel.setToolTip(dewPointMarginHelp)
+        dewMarginLabel.setCursor(Qt.WhatsThisCursor)
+        
+        form.addRow(kpLabel, self.kp_spin)
+        form.addRow(kiLabel, self.ki_spin)
+        form.addRow(kdLabel, self.kd_spin)
+        form.addRow(dewMarginLabel, self.dew_margin_spin)
+        
+        pid_layout.addLayout(form)
+        
+        self.default_kp_info = QLabel()
+        self.default_kp_info.setWordWrap(True)
+        self.default_kp_info.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: none;")
+        pid_layout.addWidget(self.default_kp_info)
+        self.updateDefaultKpExplanation()
+        
+        # Auto-ajustement
+        auto_layout = QHBoxLayout()
+        auto_layout.setSpacing(15)
+        auto_label = QLabel(f"Auto-ajustement Intelligent ({self.channelName})")
+        auto_label.setStyleSheet("color: #94a3b8; font-weight: 700; font-size: 11px;")
+        
+        initial_auto_state = False
+        if self.reference_astra_drew:
+            initial_auto_state = self.reference_astra_drew.get_autoUpdateKpKiKd()
+        
+        self.auto_toggle = AnimatedToggleButton(self, initial_state=initial_auto_state,
+                                                toggle_callback=self.onAutoToggleChanged)
+        auto_layout.addWidget(auto_label)
+        auto_layout.addStretch()
+        auto_layout.addWidget(self.auto_toggle)
+        pid_layout.addLayout(auto_layout)
+        
+        self.update_spinboxes_state(initial_auto_state)
+        
+        layout.addWidget(pid_group)
+        layout.addStretch()
+        
+        # =========== BOUTONS ===========
+        btns = QHBoxLayout()
+        btns.setSpacing(10)
+        
+        reset = QPushButton("Réinitialiser PID")
+        reset.setObjectName("action")
+        reset.setStyleSheet("background-color: transparent; color: #f59e0b; border: 1px solid #f59e0b;")
+        reset.clicked.connect(self.reset_to_defaults)
+        
+        cancel = QPushButton("Annuler")
+        cancel.setObjectName("action")
+        cancel.setStyleSheet("background-color: #334155; color: white; border: none;")
+        cancel.clicked.connect(self.reject)
+        
+        save = QPushButton("Enregistrer")
+        save.setObjectName("action")
+        save.setStyleSheet("background-color: #10b981; color: white; border: none;")
+        save.clicked.connect(self.accept_config)
+        
+        btns.addWidget(reset)
+        btns.addStretch()
+        btns.addWidget(cancel)
+        btns.addWidget(save)
+        layout.addLayout(btns)
+    
+    def onAutoToggleChanged(self, state: bool):
+        """Appelé quand le switch auto-ajustement change d'état."""
+        self.update_spinboxes_state(state)
+        if self.widget:
+            if state:
+                self.widget.AstraDrew.set_autoUpdateKpKiKd()
+            else:
+                self.widget.AstraDrew.unset_autoUpdateKpKiKd()
+    
+    def update_spinboxes_state(self, auto_enabled):
+        """Met à jour l'état des spinboxes selon l'auto-ajustement."""
+        self.kp_spin.setEnabled(not auto_enabled)
+        self.ki_spin.setEnabled(not auto_enabled)
+        self.kd_spin.setEnabled(not auto_enabled)
+        self.dew_margin_spin.setEnabled(not auto_enabled)
+    
+    def updateDefaultKpExplanation(self):
+        """Affiche le calcul du Kp par défaut."""
+        margin = self.dew_margin_spin.value()
+        default_kp = 0.0 if margin <= 0 else 100.0 / margin
+        self.default_kp_info.setText(
+            f"Marge actuelle : {margin:.2f}°C → Kp par défaut : {default_kp:.3f} (100 / {margin:.2f})"
+        )
+    
+    def onDewPointMarginChanged(self, value: float) -> None:
+        """Applique la marge de rosée et resynchronise Kp en mode manuel."""
+        if not self.auto_toggle.isChecked():
+            defaultKp = 0.0 if value <= 0.0 else 100.0 / value
+            self.kp_spin.setValue(defaultKp)
+        
+        if self.widget:
+            self.widget.AstraDrew.set_deltaTempRosee(value)
+            if not self.auto_toggle.isChecked():
+                self.widget.AstraDrew.Kp = self.kp_spin.value()
+    
+    def reset_to_defaults(self):
+        """Réinitialise les paramètres PID aux valeurs par défaut."""
+        if self.reference_astra_drew:
+            self.reference_astra_drew.set_deltaTempRosee(self.dew_margin_spin.value())
+            self.reference_astra_drew.setDefaultKpKiKd()
+            self.reference_astra_drew.unset_autoUpdateKpKiKd()
+            self.kp_spin.setValue(self.reference_astra_drew.get_Kp())
+            self.ki_spin.setValue(self.reference_astra_drew.get_Ki())
+            self.kd_spin.setValue(self.reference_astra_drew.get_Kd())
+        else:
+            self.kp_spin.setValue(0.0)
+            self.ki_spin.setValue(0.0)
+            self.kd_spin.setValue(0.0)
+        self.auto_toggle.setState(False)
+        self.update_spinboxes_state(False)
+    
+    def accept_config(self):
+        """Enregistre les modifications de capteur et PID."""
+        # Capteur
+        if self.widget:
+            s = self.sensor_combo.currentText()
+            self.widget.AstraDrew.set_associateTemp(None if "— Aucun" in s else s)
+            
+            # PID
+            kp, ki, kd = self.kp_spin.value(), self.ki_spin.value(), self.kd_spin.value()
+            dewPointMarginC = self.dew_margin_spin.value()
+            auto = self.auto_toggle.isChecked()
+            
+            self.widget.AstraDrew.set_deltaTempRosee(dewPointMarginC)
+            self.widget.AstraDrew.Kp, self.widget.AstraDrew.Ki, self.widget.AstraDrew.Kd = kp, ki, kd
+            if auto:
+                self.widget.AstraDrew.set_autoUpdateKpKiKd()
+            else:
+                self.widget.AstraDrew.unset_autoUpdateKpKiKd()
+            
+            self.widget.AstraDrew.save()
+        self.accept()
+
+
+class PIDConfigDialog(QDialog):
+
+    def __init__(self, parent, widget):
+        super().__init__(parent)
+        self.widget = widget
+        self.reference_astra_drew = widget.AstraDrew if widget else None
+        self.channelName = widget.display_name if widget else "RCA"
+        self.initUI()
+    
+    def initUI(self):
+        self.setWindowTitle(f"Réglages PID - {self.channelName}")
         self.setModal(True)
         self.setMinimumWidth(400)
         self.setStyleSheet("""
@@ -57,13 +381,56 @@ class PIDConfigDialogShared(QDialog):
         layout.setSpacing(25)
         layout.setContentsMargins(30, 30, 30, 30)
         
-        title = QLabel("Paramètres PID")
+        title = QLabel(f"Paramètres PID - {self.channelName}")
         title.setStyleSheet("font-size: 22px; font-weight: 900; color: #f8fafc; text-transform: none; letter-spacing: 0px;")
         layout.addWidget(title)
         
         form = QFormLayout()
         form.setSpacing(15)
         form.setLabelAlignment(Qt.AlignLeft)
+
+        pidAlgorithmHelp = (
+            "<b>Algorithme PID (simplifié)</b><br>"
+            "Commande = Kp × erreur + Ki × somme(erreurs) + Kd × variation(erreur)<br><br>"
+            "<b>Erreur</b> = Consigne - Température mesurée.<br>"
+            "Le but est de corriger vite, sans oscillations et sans dérive."
+        )
+
+        dewPointMarginHelp = (
+            "<b>Marge au point de rosée</b><br>"
+            "Cette valeur fixe de combien de degrés l'équipement doit rester au-dessus "
+            "du point de rosée pour éviter la condensation.<br><br>"
+            "La consigne automatique est calculée ainsi :<br>"
+            "<b>Consigne = Point de rosée + marge</b><br><br>"
+            "Le Kp par défaut est dérivé de cette marge pour obtenir 100 % de chauffe "
+            "lorsque l'erreur est égale à cette marge :<br>"
+            "<b>Kp_défaut = 100 / marge</b><br><br>"
+            "Exemple : avec une marge de 2.0°C, le Kp par défaut vaut 50."
+        )
+
+        kpHelp = (
+            "<b>Kp - Proportionnel</b><br>"
+            f"{pidAlgorithmHelp}<br><br>"
+            "Réagit immédiatement à l'erreur actuelle.<br>"
+            "- Trop faible: réponse molle, lente.<br>"
+            "- Trop fort: risque d'oscillations et de sur-réaction."
+        )
+
+        kiHelp = (
+            "<b>Ki - Intégral</b><br>"
+            f"{pidAlgorithmHelp}<br><br>"
+            "Cumule les erreurs dans le temps pour supprimer l'écart permanent.<br>"
+            "- Trop faible: offset résiduel possible.<br>"
+            "- Trop fort: dépassement et instabilité (windup)."
+        )
+
+        kdHelp = (
+            "<b>Kd - Dérivé</b><br>"
+            f"{pidAlgorithmHelp}<br><br>"
+            "Anticipe la tendance de l'erreur (frein dynamique).<br>"
+            "- Trop faible: amortissement limité.<br>"
+            "- Trop fort: sensible au bruit de mesure."
+        )
         
         def create_spin():
             s = QDoubleSpinBox()
@@ -79,16 +446,47 @@ class PIDConfigDialogShared(QDialog):
         
         self.kd_spin = create_spin()
         if self.reference_astra_drew: self.kd_spin.setValue(self.reference_astra_drew.get_Kd())
-        
-        form.addRow("Kp (Proportionnel)", self.kp_spin)
-        form.addRow("Ki (Intégral)", self.ki_spin)
-        form.addRow("Kd (Dérivé)", self.kd_spin)
+
+        self.dew_margin_spin = create_spin()
+        self.dew_margin_spin.setRange(0.1, 20.0)
+        self.dew_margin_spin.setDecimals(2)
+        if self.reference_astra_drew:
+            self.dew_margin_spin.setValue(self.reference_astra_drew.get_deltaTempRosee())
+        self.dew_margin_spin.valueChanged.connect(self.onDewPointMarginChanged)
+        self.dew_margin_spin.valueChanged.connect(self.updateDefaultKpExplanation)
+
+        kpLabel = QLabel("Kp (Proportionnel)")
+        kpLabel.setToolTip(kpHelp)
+        kpLabel.setCursor(Qt.WhatsThisCursor)
+
+        kiLabel = QLabel("Ki (Intégral)")
+        kiLabel.setToolTip(kiHelp)
+        kiLabel.setCursor(Qt.WhatsThisCursor)
+
+        kdLabel = QLabel("Kd (Dérivé)")
+        kdLabel.setToolTip(kdHelp)
+        kdLabel.setCursor(Qt.WhatsThisCursor)
+
+        dewMarginLabel = QLabel("Marge Rosée")
+        dewMarginLabel.setToolTip(dewPointMarginHelp)
+        dewMarginLabel.setCursor(Qt.WhatsThisCursor)
+
+        form.addRow(kpLabel, self.kp_spin)
+        form.addRow(kiLabel, self.ki_spin)
+        form.addRow(kdLabel, self.kd_spin)
+        form.addRow(dewMarginLabel, self.dew_margin_spin)
         layout.addLayout(form)
+
+        self.default_kp_info = QLabel()
+        self.default_kp_info.setWordWrap(True)
+        self.default_kp_info.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600; text-transform: none;")
+        layout.addWidget(self.default_kp_info)
+        self.updateDefaultKpExplanation()
         
         # Switch Auto-ajustement avec label
         auto_layout = QHBoxLayout()
         auto_layout.setSpacing(15)
-        auto_label = QLabel("Auto-ajustement Intelligent")
+        auto_label = QLabel(f"Auto-ajustement Intelligent ({self.channelName})")
         auto_label.setStyleSheet("color: #94a3b8; font-weight: 700; font-size: 12px;")
         
         initial_auto_state = False
@@ -96,7 +494,7 @@ class PIDConfigDialogShared(QDialog):
             initial_auto_state = self.reference_astra_drew.get_autoUpdateKpKiKd()
         
         self.auto_toggle = AnimatedToggleButton(self, initial_state=initial_auto_state, 
-                                                toggle_callback=self.on_auto_toggle_changed)
+                                                toggle_callback=self.onAutoToggleChanged)
         auto_layout.addWidget(auto_label)
         auto_layout.addStretch()
         auto_layout.addWidget(self.auto_toggle)
@@ -126,32 +524,76 @@ class PIDConfigDialogShared(QDialog):
         btns.addWidget(reset); btns.addStretch(); btns.addWidget(cancel); btns.addWidget(save)
         layout.addLayout(btns)
 
-    def on_auto_toggle_changed(self, state):
-        """Appelé quand le switch auto-ajustement change d'état"""
+    def onAutoToggleChanged(self, state: bool):
+        """Appelé quand le switch auto-ajustement change d'état, persiste immédiatement."""
         self.update_spinboxes_state(state)
+        # Persister immédiatement dans le modèle AstraPwm
+        if self.widget:
+            if state:
+                self.widget.AstraDrew.set_autoUpdateKpKiKd()
+            else:
+                self.widget.AstraDrew.unset_autoUpdateKpKiKd()
+    
+    def on_auto_toggle_changed(self, state):
+        """Deprecated: utilisez onAutoToggleChanged à la place."""
+        self.onAutoToggleChanged(state)
+
     
     def update_spinboxes_state(self, auto_enabled):
         """Met à jour l'état (activé/désactivé) des spinboxes selon l'état de l'auto-ajustement"""
         self.kp_spin.setEnabled(not auto_enabled)
         self.ki_spin.setEnabled(not auto_enabled)
         self.kd_spin.setEnabled(not auto_enabled)
+        self.dew_margin_spin.setEnabled(not auto_enabled)
+
+    def updateDefaultKpExplanation(self):
+        """Affiche le calcul du Kp par défaut à partir de la marge de rosée."""
+        margin = self.dew_margin_spin.value()
+        default_kp = 0.0 if margin <= 0 else 100.0 / margin
+        self.default_kp_info.setText(
+            f"Marge actuelle : {margin:.2f}°C. En mode rosée, la consigne devient "
+            f"point de rosée + {margin:.2f}°C. Si vous réinitialisez les gains PID, "
+            f"le Kp par défaut calculé sera {default_kp:.3f} (100 / {margin:.2f})."
+        )
+
+    def onDewPointMarginChanged(self, value: float) -> None:
+        """Applique la marge de rosée et resynchronise Kp en mode manuel."""
+        if not self.auto_toggle.isChecked():
+            defaultKp = 0.0 if value <= 0.0 else 100.0 / value
+            self.kp_spin.setValue(defaultKp)
+
+        if self.widget:
+            self.widget.AstraDrew.set_deltaTempRosee(value)
+            if not self.auto_toggle.isChecked():
+                self.widget.AstraDrew.Kp = self.kp_spin.value()
 
     def reset_to_defaults(self):
-        self.kp_spin.setValue(2.0)
-        self.ki_spin.setValue(0.0)
-        self.kd_spin.setValue(0.0)
+        if self.reference_astra_drew:
+            self.reference_astra_drew.set_deltaTempRosee(self.dew_margin_spin.value())
+            self.reference_astra_drew.setDefaultKpKiKd()
+            self.reference_astra_drew.unset_autoUpdateKpKiKd()  # Réinitialiser l'auto-ajustement
+            self.kp_spin.setValue(self.reference_astra_drew.get_Kp())
+            self.ki_spin.setValue(self.reference_astra_drew.get_Ki())
+            self.kd_spin.setValue(self.reference_astra_drew.get_Kd())
+        else:
+            self.kp_spin.setValue(0.0)
+            self.ki_spin.setValue(0.0)
+            self.kd_spin.setValue(0.0)
         self.auto_toggle.setState(False)
         self.update_spinboxes_state(False)
 
     def accept_config(self):
         kp, ki, kd = self.kp_spin.value(), self.ki_spin.value(), self.kd_spin.value()
+        dewPointMarginC = self.dew_margin_spin.value()
         auto = self.auto_toggle.isChecked()
-        for w in self.widgets:
-            w.AstraDrew.Kp, w.AstraDrew.Ki, w.AstraDrew.Kd = kp, ki, kd
-            if auto: w.AstraDrew.set_autoUpdateKpKiKd()
-            else: w.AstraDrew.unset_autoUpdateKpKiKd()
-            w.AstraDrew.save()
-        self.accept()
+        if self.widget:
+            self.widget.AstraDrew.set_deltaTempRosee(dewPointMarginC)
+            self.widget.AstraDrew.Kp, self.widget.AstraDrew.Ki, self.widget.AstraDrew.Kd = kp, ki, kd
+            if auto:
+                self.widget.AstraDrew.set_autoUpdateKpKiKd()
+            else:
+                self.widget.AstraDrew.unset_autoUpdateKpKiKd()
+            self.widget.AstraDrew.save()
 
 
 class SensorConfigDialog(QDialog):
@@ -410,7 +852,9 @@ class DrewControl(QWidget):
                 self.buttonAsservOn = False; self.buttonRoseeConsigneOn = False
             elif mid == 1: # PID Fixe
                 print(f"[DEBUG on_mode_changed] {self.name}: Mode PID activé - vérification du capteur...")
-                self.p_row_widget.setVisible(False)
+                # En mode PID, la puissance est pilotée par l'asservissement,
+                # mais on l'affiche pour monitoring comme en mode AUTO.
+                self.p_row_widget.setVisible(True)
                 self.c_row_widget.setVisible(True)
                 self.AstraDrew.unset_asservTempRosee()
                 temp_sensor = self.AstraDrew.get_associateTemp()
@@ -493,7 +937,7 @@ class DrewControl(QWidget):
 
     def set_power(self, v): self.p_val.setText(f"{v}%"); self.AstraDrew.set_ratio(v)
     def set_consigne(self, v): self.c_val.setText(f"{v/10:.1f}°C"); self.AstraDrew.set_cmdTemp(v/10)
-    def open_config_dialog(self): SensorConfigDialog(self, [self]).exec_()
+    def open_config_dialog(self): UnifiedChannelConfigDialog(self, self).exec_()
 
     def update_text_fields(self):
         if self.buttonAsservOn:
@@ -574,16 +1018,8 @@ class MainPwmWindow(QWidget):
         self.bme_type = QLabel("Environnement: --")
         self.bme_type.setStyleSheet("color: #94a3b8; font-weight: 700; font-size: 11px; text-transform: uppercase;")
         
-        cfg_pid = QPushButton("PARAMÈTRES PID")
-        cfg_pid.setCursor(Qt.PointingHandCursor)
-        cfg_pid.setStyleSheet("""
-            QPushButton { background-color: #334155; color: #f8fafc; padding: 8px 20px; border-radius: 6px; font-weight: 800; font-size: 11px; }
-            QPushButton:hover { background-color: #475569; }
-        """)
-        cfg_pid.clicked.connect(self.open_pid_config)
-        
         foot_lay.addWidget(self.bme_led); foot_lay.addWidget(self.bme_type)
-        foot_lay.addStretch(); foot_lay.addWidget(cfg_pid)
+        foot_lay.addStretch()
         main_vbox.addWidget(footer)
 
         self.timer = QTimer()
@@ -597,8 +1033,6 @@ class MainPwmWindow(QWidget):
             is_ok = amb != self.widgets[0].AstraDrew.TEMPUNAVAIL
             self.bme_led.setStyleSheet(f"color: {'#10b981' if is_ok else '#ef4444'}; font-size: 14px;")
             self.bme_type.setText(f"Environnement: {'BME280' if is_ok else 'DÉCONNECTÉ'}")
-
-    def open_pid_config(self): PIDConfigDialogShared(self, self.widgets).exec_()
 
     def closeEvent(self, event):
         for w in self.widgets: w.AstraDrew.end()

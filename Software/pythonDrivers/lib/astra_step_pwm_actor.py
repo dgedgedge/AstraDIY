@@ -106,6 +106,12 @@ class AstraStepPwmActor(AstraComActor):
         """Return the high duration as a percentage of the logical step count."""
         return self._stepPercent
 
+    def getPwmUpdatePeriodS(self) -> float:
+        """Return the minimum delay between two effective PWM pattern updates."""
+        if self.cyclePeriodS is None or self.cyclePeriodS <= 0:
+            return 0.0
+        return float(self.cyclePeriodS)
+
     def isHigh(self) -> bool:
         """Return the current GPIO output state."""
         return self._line.get_value() != 0
