@@ -75,11 +75,11 @@ class AstraPwm():
     TEMPUNAVAIL=AstraBmeFetcher.TEMPUNAVAIL
     astraGpioSet = { 
                 "AstraPwm1": {
-                    "pi5": { "gpio":18 },# Canal 1 = GPIO 18 (INA 0x49) - CONFIRMÉ PAR TEST après correction overlay
+                    "pi5": { "gpio":18 },# Canal 1 = GPIO 13 (INA 0x49) - CONFIRMÉ PAR TEST après correction overlay
                     "pi4": { "gpio":18 },
                               },
                 "AstraPwm2": {
-                    "pi5": { "gpio":13 },# Canal 2 = GPIO 13 (INA 0x4A) - CONFIRMÉ PAR TEST après correction overlay
+                    "pi5": { "gpio":13 },# Canal 2 = GPIO 18 (INA 0x4D) - CONFIRMÉ PAR TEST après correction overlay
                     "pi4": { "gpio":13 },
                 }
     }

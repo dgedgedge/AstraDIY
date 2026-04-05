@@ -157,7 +157,7 @@ class AstraComFetcher(threading.Thread):
     ACTIVATION_TOLERANCE_RATIO = 0.10
     PHASE_DELAY_S = 0.001
     MAX_CONVERSION_TIME_S = 0.001
-    CYCLE_PERIOD_S = 0.3
+    CYCLE_PERIOD_S = 0.25
     CYCLE_STEP_COUNT = 10
     _instance: Optional["AstraComFetcher"] = None
 
@@ -316,7 +316,7 @@ class AstraComFetcher(threading.Thread):
             allowedDeltaMs = allowedDeltaS * 1000.0
             errorMs = abs(actualPeriodS - expectedPeriodS) * 1000.0
             print(
-                f"[ERROR AstraComFetcher] Activation timing out of tolerance: "
+                f"[ERROR AstraComFetcher] Activation timing out of tolerance (did you set I2c to 40KHz in firmware): "
                 f"step={step} "
                 f"expected={expectedPeriodMs:.3f}ms actual={actualPeriodMs:.3f}ms "
                 f"runExec={executionDurationS * 1000.0:.3f}ms "
