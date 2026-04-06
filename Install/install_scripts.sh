@@ -97,7 +97,7 @@ fi
 # Vérifier les fichiers Python principaux
 echo ""
 echo "Vérification des fichiers Python..."
-EXPECTED_FILES="AstraGpioHmi.py AstraPwmHmi.py AstraInaHmi.py AstraGpsHmi.py AstraDIYHmi.py survDateOffset.py"
+EXPECTED_FILES="AstraGpioHmi.py AstraPwmHmi.py AstraAlimHmi.py AstraGpsHmi.py AstraDIYHmi.py survDateOffset.py"
 for FILE in $EXPECTED_FILES
 do
 	if [ -f "$INSTALLDIR/$FILE" ]; then

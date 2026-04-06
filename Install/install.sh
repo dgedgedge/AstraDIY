@@ -1,5 +1,5 @@
 #!/bin/env bash
-FILESOURCE=$(dirname $0)
+FILESOURCE=$(readlink -f $(dirname $0))
 
 sudo ${FILESOURCE}/install_gps.sh
 sudo ${FILESOURCE}/install_scripts.sh

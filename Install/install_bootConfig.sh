@@ -9,6 +9,16 @@ if ! egrep -q -e "^dtparam=i2c_arm=on" ${BOOTFILE} ; then
    sudo sed -i '/^#dtparam=i2c_arm=on/s/^#//' ${BOOTFILE}
    echo "Need to reboot for a full operational temperature sensor"
 fi
+if ! grep -q "dtparam=i2c_arm_baudrate=400000" ${BOOTFILE} ; then
+    echo "L'option dtparam=i2c_arm_baudrate=400000 n'est pas dans le fichier /boot/firmware/config.txt. Ajout en cours..."
+    echo "Need to reboot for a full operational temperature sensor"
+    cat >> ${BOOTFILE}  << "END1"
+# Begin AstrAlim Set I2C Baudrate
+dtparam=i2c_arm_baudrate=400000
+# End AstrAlim Set I2C Baudrate
+END1
+fi
+
 
 if ! grep -q "w1-gpio" ${BOOTFILE} ; then
     echo "L'option w1-gpio n'est pas dans le fichier /boot/firmware/config.txt. Ajout en cours..."
@@ -33,6 +43,13 @@ dtoverlay=pwm-2chan,pin=18,func=2,pin2=13,func2=4
 
 END1
    echo "Need to reboot for a full operational pwm"
+else
+    # Vérifier si la configuration est correcte (func2=4, pas func2=0)
+    if grep -q "pwm-2chan.*func2=0" ${BOOTFILE} ; then
+        echo "⚠️  Configuration PWM incorrecte détectée (func2=0 au lieu de func2=4). Correction en cours..."
+        sed -i 's/dtoverlay=pwm-2chan,pin=18,func=2,pin2=13,func2=0/dtoverlay=pwm-2chan,pin=18,func=2,pin2=13,func2=4/g' ${BOOTFILE}
+        echo "✅ Configuration PWM corrigée. Need to reboot for a full operational pwm"
+    fi
 fi
 
 if ! grep -q "AstrAlimPowerManagement" ${BOOTFILE} ; then
