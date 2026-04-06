@@ -138,8 +138,8 @@ class MainGpsWindow(QWidget):
         
         ntp_stats = QVBoxLayout()
         ntp_stats.setSpacing(2)
-        self.val_prec = QLabel("PRÉCISION: -- µs"); self.val_prec.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 700;")
-        self.val_off = QLabel("DÉCALAGE: -- µs"); self.val_off.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 700;")
+        self.val_prec = QLabel("PRÉCISION: -- µs"); self.val_prec.setStyleSheet("color: #64748b; font-size: 16px; font-weight: 700;")
+        self.val_off = QLabel("DÉCALAGE: -- µs"); self.val_off.setStyleSheet("color: #64748b; font-size: 16px; font-weight: 700;")
         ntp_stats.addStretch(); ntp_stats.addWidget(self.val_prec); ntp_stats.addWidget(self.val_off); ntp_stats.addStretch()
         
         clock_row.addWidget(self.val_clock); clock_row.addStretch(); clock_row.addLayout(ntp_stats)
