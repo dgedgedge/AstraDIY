@@ -713,7 +713,7 @@ bool AstrAlimHeater::readBME280()
     // For now, we'll use a Python one-liner approach
     
     std::string result = execCommand(
-        "python3 -c \""
+        "flock -w 1 /tmp/astradiy_i2c.lock python3 -c \""
         "try:\n"
         "    from lib.bme280_lib import readBME280All\n"
         "    t,p,h = readBME280All()\n"
@@ -2008,7 +2008,7 @@ void AstrAlimHeater::readINA219()
     // Format: voltage_mV;current_mA for each heater
     // Use integer payload to avoid locale-dependent float parsing issues.
     std::string result = execCommand(
-        "python3 -c \""
+        "flock -w 1 /tmp/astradiy_i2c.lock python3 -c \""
         "import os\n"
         "import sys\n"
         "import glob\n"
@@ -2221,7 +2221,7 @@ bool AstrAlimHeater::resetINAChannel(int channel)
     const int addr = (channel == 0) ? INA_ADDR_H1 : INA_ADDR_H2;
     char cmd[1024];
     snprintf(cmd, sizeof(cmd),
-             "python3 -c \"import smbus,time; bus=smbus.SMBus(1); bus.write_i2c_block_data(0x%02x, 0x00, [0x80, 0x00]); time.sleep(0.02); print('ok')\" 2>/dev/null",
+             "flock -w 1 /tmp/astradiy_i2c.lock python3 -c \"import smbus,time; bus=smbus.SMBus(1); bus.write_i2c_block_data(0x%02x, 0x00, [0x80, 0x00]); time.sleep(0.02); print('ok')\" 2>/dev/null",
              addr);
     std::string result = execCommand(cmd);
     return result == "ok";

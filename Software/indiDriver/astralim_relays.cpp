@@ -285,7 +285,7 @@ void AstrAlimRelays::readINA219()
     // Read INA219 sensors via Python helper
     // Format: voltage,current,power for each sensor
     std::string result = execCommand(
-        "python3 -c \""
+        "flock -w 1 /tmp/astradiy_i2c.lock python3 -c \""
         "import sys\n"
         "sys.path.insert(0, '/home/stellarmate')\n"
         "try:\n"
