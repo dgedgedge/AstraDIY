@@ -287,6 +287,9 @@ void AstrAlimRelays::readINA219()
     std::string result = execCommand(
         "python3 -c \""
         "import sys\n"
+        "import fcntl\n"
+        "lockf = open('/tmp/astradiy_i2c.lock', 'w')\n"
+        "fcntl.flock(lockf, fcntl.LOCK_EX)\n"
         "sys.path.insert(0, '/home/stellarmate')\n"
         "try:\n"
         "    from lib.ina219 import INA219\n"

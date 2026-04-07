@@ -20,6 +20,13 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <array>
+#include <condition_variable>
+#include <mutex>
+
+namespace AstrAlim {
+class GpioController;
+}
 
 class AstrAlimHeater : public INDI::DefaultDevice
 {
@@ -47,6 +54,8 @@ private:
     bool initPWM();
     void closePWM();
     bool setPWMDuty(int channel, double percent);
+    void runStepPwmLoop();
+    std::array<bool, 10> buildStepPattern(double percent) const;
     
     // Temperature sensors
     bool readDS18B20Sensors();
@@ -65,6 +74,9 @@ private:
     
     // Power monitoring
     void readINA219();
+    void resetINADisplayState();
+    bool resetINAChannel(int channel);
+    void applyINAChannelSample(int channel, bool validSample, bool currentValid, double sampleVoltage, double sampleCurrent, bool heaterActive);
     
     // PID control
     void runPIDControl(int channel);
@@ -72,12 +84,20 @@ private:
     
     // Helper
     std::string execCommand(const char* cmd);
-    int getPWMChip();
-    int getPWMChannel(int heaterChannel);
-
-    // PWM file descriptors
-    int pwmChip = -1;
-    bool pwmEnabled[2] = {false, false};
+    
+    // Step PWM runtime state (aligned with Python HMI behavior)
+    static constexpr int STEP_PWM_TICK_MS = 250;
+    static constexpr int STEP_PWM_STEP_COUNT = 10;
+    static constexpr int STEP_PWM_GPIO_H1 = 18; // AstraPwm1
+    static constexpr int STEP_PWM_GPIO_H2 = 13; // AstraPwm2
+    std::unique_ptr<AstrAlim::GpioController> pwmGpio;
+    std::array<double, 2> pwmDutyPercent = {0.0, 0.0};
+    std::array<std::array<bool, STEP_PWM_STEP_COUNT>, 2> pwmStepPattern = {};
+    std::thread pwmStepThread;
+    std::atomic<bool> pwmStepRunning {false};
+    std::mutex pwmStepMutex;
+    std::condition_variable pwmStepCv;
+    int pwmStepIndex = 0;
     
     // PID state
     double pidIntegral[2] = {0, 0};
@@ -151,10 +171,30 @@ private:
     // Power monitoring (if INA219 available)
     INDI::PropertyNumber PowerMonitorNP {4};
     enum { PWR_VOLTAGE1, PWR_CURRENT1, PWR_VOLTAGE2, PWR_CURRENT2 };
+    std::array<double, 2> inaDisplayVoltage = {0.0, 0.0};
+    std::array<double, 2> inaDisplayCurrent = {0.0, 0.0};
+    std::array<bool, 2> inaHasSample = {false, false};
+    std::array<int, 2> inaInvalidCount = {0, 0};
+    std::array<int, 2> inaZeroWhileActiveCount = {0, 0};
+    std::array<std::string, 2> inaLastErrorTag = {"", ""};
+    std::array<int, 2> inaErrorLogCount = {0, 0};
+    std::array<bool, 2> inaNoResponseActive = {false, false};
+    std::array<std::chrono::steady_clock::time_point, 2> inaNoResponseSince {};
+    std::array<std::chrono::steady_clock::time_point, 2> inaLastResetAttempt {};
 
     // Constants
     static constexpr int POLL_INTERVAL_MS = 5000;
     static constexpr int SENSOR_LIST_UPDATE_INTERVAL_CYCLES = 6;  // 30s with 5s poll
+    static constexpr double INA_FILTER_ALPHA_ACTIVE = 0.25;
+    static constexpr double INA_FILTER_ALPHA_IDLE = 0.60;
+    static constexpr int INA_ZERO_GLITCH_HOLD_CYCLES = 3;
+    static constexpr int INA_INVALID_RESET_CYCLES = 12;
+    static constexpr int INA_STARTUP_FALLBACK_CYCLES = 3;
+    static constexpr int INA_LOG_REPEAT_CYCLES = 6;
+    static constexpr int INA_NO_RESPONSE_RESET_DELAY_MS = 5000;
+    static constexpr int INA_RESET_COOLDOWN_MS = 5000;
+    static constexpr int INA_ADDR_H1 = 0x4d;
+    static constexpr int INA_ADDR_H2 = 0x49;
     static constexpr double DEFAULT_KP = 2.0;
     static constexpr double DEFAULT_KI = 0.1;
     static constexpr double DEFAULT_KD = 0.5;

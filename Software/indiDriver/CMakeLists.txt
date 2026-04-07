@@ -59,8 +59,9 @@ install(TARGETS indi_astralim_system RUNTIME DESTINATION bin)
 ################ AstrAlim Heater ################
 add_executable(indi_astralim_heater
     ${CMAKE_CURRENT_SOURCE_DIR}/astralim_heater.cpp
+    ${gpio_SRCS}
 )
-target_link_libraries(indi_astralim_heater ${INDI_LIBRARIES})
+target_link_libraries(indi_astralim_heater ${INDI_LIBRARIES} ${GPIOD_LIBRARIES})
 install(TARGETS indi_astralim_heater RUNTIME DESTINATION bin)
 
 ################ XML Driver Description ################

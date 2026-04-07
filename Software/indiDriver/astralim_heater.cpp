@@ -4,6 +4,7 @@
  ******************************************************************************/
 
 #include "astralim_heater.h"
+#include "astralim_gpio.h"
 #include "config.h"
 
 #include <cstring>
@@ -18,7 +19,7 @@
 #include <vector>
 #include <algorithm>
 #include <chrono>
-#include <glob.h>
+#include <set>
 
 // Singleton instance
 static std::unique_ptr<AstrAlimHeater> heaterInstance(new AstrAlimHeater());
@@ -28,6 +29,7 @@ AstrAlimHeater::AstrAlimHeater()
     setVersion(INDI_ASTRALIM_VERSION_MAJOR, INDI_ASTRALIM_VERSION_MINOR);
     pidRunning[0] = false;
     pidRunning[1] = false;
+    pwmGpio = std::make_unique<AstrAlim::GpioController>();
     
     // Initialiser les états d'assignation
     for (int i = 0; i < 2; i++)
@@ -58,6 +60,7 @@ AstrAlimHeater::~AstrAlimHeater()
         if (pidThread[i].joinable())
             pidThread[i].join();
     }
+    closePWM();
 }
 
 const char* AstrAlimHeater::getDefaultName()
@@ -283,6 +286,7 @@ bool AstrAlimHeater::Connect()
     Heater2PowerNP.apply();
     
     // Initial readings
+    resetINADisplayState();
     readBME280();
     readDS18B20Sensors();
     
@@ -307,6 +311,7 @@ bool AstrAlimHeater::Disconnect()
     setPWMDuty(1, 0);
     
     closePWM();
+    resetINADisplayState();
     
     LOG_INFO("AstrAlim Heater disconnected");
     return true;
@@ -434,196 +439,181 @@ void AstrAlimHeater::TimerHit()
 
 // ==================== PWM Control ====================
 
-int AstrAlimHeater::getPWMChip()
+std::array<bool, 10> AstrAlimHeater::buildStepPattern(double percent) const
 {
-    // Dynamic detection: find first pwmchip with at least 2 channels
-    // This works with kernel 6.6 (pwmchip2) and kernel 6.12+ (pwmchip0/1/2 variable)
-    glob_t glob_result;
-    memset(&glob_result, 0, sizeof(glob_result));
-    
-    int ret = glob("/sys/class/pwm/pwmchip*", GLOB_TILDE, nullptr, &glob_result);
-    if (ret == 0)
-    {
-        // Sort paths to check in order
-        std::vector<std::string> chipPaths;
-        for (size_t i = 0; i < glob_result.gl_pathc; i++)
-        {
-            chipPaths.push_back(glob_result.gl_pathv[i]);
-        }
-        std::sort(chipPaths.begin(), chipPaths.end());
-        
-        // Check each pwmchip for sufficient channels
-        for (const auto& chipPath : chipPaths)
-        {
-            try
-            {
-                // Extract chip number from path (e.g., "/sys/class/pwm/pwmchip2" -> 2)
-                std::string chipNumStr = chipPath.substr(strlen("/sys/class/pwm/pwmchip"));
-                int chipNum = std::stoi(chipNumStr);
-                
-                // Check npwm file
-                std::string npwmPath = chipPath + "/npwm";
-                std::ifstream npwmFile(npwmPath);
-                if (npwmFile.is_open())
-                {
-                    int npwm = 0;
-                    npwmFile >> npwm;
-                    npwmFile.close();
-                    
-                    // Check if chip directory exists and has enough channels
-                    if (npwm >= 2 && access(chipPath.c_str(), F_OK) == 0)
-                    {
-                        globfree(&glob_result);
-                        LOGF_INFO("Auto-detected pwmchip%d with %d channels", chipNum, npwm);
-                        return chipNum;
-                    }
-                }
-            }
-            catch (...)
-            {
-                // Skip invalid chip paths
-                continue;
-            }
-        }
-        globfree(&glob_result);
-    }
-    
-    // Fallback: try Pi 4 default (pwmchip0)
-    if (access("/sys/class/pwm/pwmchip0", F_OK) == 0)
-    {
-        LOG_INFO("Using fallback pwmchip0");
-        return 0;
-    }
-    
-    // No PWM chip found
-    LOG_ERROR("No PWM chip found with sufficient channels (>=2). Check dtoverlay configuration.");
-    return -1;
-}
+    std::array<bool, 10> pattern {};
+    percent = std::max(0.0, std::min(100.0, percent));
 
-int AstrAlimHeater::getPWMChannel(int heaterChannel)
-{
-    // Mapping des canaux PWM :
-    // Pi 5: Heater 1 (channel 0) → PWM channel 1 (GPIO 18, INA 0x49, AstraPwm1)
-    //       Heater 2 (channel 1) → PWM channel 2 (GPIO 13, INA 0x4d, AstraPwm2)
-    // Pi 4: Heater 1 (channel 0) → PWM channel 0
-    //       Heater 2 (channel 1) → PWM channel 1
-    std::string model = execCommand("cat /sys/firmware/devicetree/base/model 2>/dev/null");
-    if (model.find("Pi 5") != std::string::npos)
-        return heaterChannel + 1;
-    else
-        return heaterChannel;
+    const int stepCount = STEP_PWM_STEP_COUNT;
+    int highStepCount = static_cast<int>(std::lround(stepCount * percent / 100.0));
+    highStepCount = std::max(0, std::min(highStepCount, stepCount));
+
+    if (highStepCount == 0)
+        return pattern;
+
+    if (highStepCount >= stepCount)
+    {
+        pattern.fill(true);
+        return pattern;
+    }
+
+    std::set<int> distributedSteps;
+    for (int i = 0; i < highStepCount; i++)
+    {
+        int step = static_cast<int>(std::lround((static_cast<double>(i) * stepCount) / highStepCount)) % stepCount;
+        distributedSteps.insert(step);
+    }
+
+    for (int candidate = 0; candidate < stepCount && static_cast<int>(distributedSteps.size()) < highStepCount; candidate++)
+    {
+        distributedSteps.insert(candidate);
+    }
+
+    for (int step : distributedSteps)
+    {
+        pattern[step] = true;
+    }
+
+    return pattern;
 }
 
 bool AstrAlimHeater::initPWM()
 {
-    pwmChip = getPWMChip();
-    
-    if (pwmChip < 0)
+    if (!pwmGpio->openChip(AstrAlim::RPI5_GPIO_CHIP))
     {
-        LOG_ERROR("Failed to detect PWM chip. Check dtoverlay configuration in /boot/firmware/config.txt and reboot.");
+        LOGF_ERROR("Failed to open GPIO chip %s for step PWM", AstrAlim::RPI5_GPIO_CHIP);
         return false;
     }
-    
-    // Verify pwmchip exists
-    std::string chipPath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip);
-    if (access(chipPath.c_str(), F_OK) != 0)
-    {
-        LOGF_ERROR("PWM chip %d not available. Check dtoverlay configuration.", pwmChip);
-        return false;
-    }
-    
+
+    const int gpioPins[2] = { STEP_PWM_GPIO_H1, STEP_PWM_GPIO_H2 };
     for (int ch = 0; ch < 2; ch++)
     {
-        int pwmChannel = getPWMChannel(ch);
-        std::string basePath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip) + "/pwm" + std::to_string(pwmChannel);
-        
-        // Export PWM channel if not already exported
-        if (access(basePath.c_str(), F_OK) != 0)
+        if (pwmGpio->isLineUsed(gpioPins[ch]))
         {
-            std::string exportPath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip) + "/export";
-            std::ofstream exportFile(exportPath);
-            if (exportFile.is_open())
+            std::string consumer = pwmGpio->getLineConsumer(gpioPins[ch]);
+            if (!consumer.empty())
             {
-                exportFile << pwmChannel;
-                exportFile.close();
-                usleep(100000); // Wait for sysfs to create files
+                LOGF_ERROR("GPIO %d is already used by '%s'. Stop HMI/other process and retry.", gpioPins[ch], consumer.c_str());
             }
             else
             {
-                LOGF_ERROR("Cannot export PWM channel %d", pwmChannel);
-                return false;
+                LOGF_ERROR("GPIO %d is already used by another process. Stop HMI/other process and retry.", gpioPins[ch]);
             }
+            pwmGpio->closeChip();
+            return false;
         }
-        
-        // Set period (1ms = 1000000ns)
-        std::string periodPath = basePath + "/period";
-        std::ofstream periodFile(periodPath);
-        if (periodFile.is_open())
-        {
-            periodFile << 1000000;
-            periodFile.close();
-        }
-        
-        // Enable PWM
-        std::string enablePath = basePath + "/enable";
-        std::ofstream enableFile(enablePath);
-        if (enableFile.is_open())
-        {
-            enableFile << 1;
-            enableFile.close();
-            pwmEnabled[ch] = true;
-        }
-        
-        // Set initial duty to 0
-        setPWMDuty(ch, 0);
     }
-    
+
+    for (int ch = 0; ch < 2; ch++)
+    {
+        char consumer[64];
+        snprintf(consumer, sizeof(consumer), "heater%d@astralim_heater", ch + 1);
+        if (!pwmGpio->requestOutput(gpioPins[ch], consumer, 0))
+        {
+            LOGF_ERROR("Failed to request GPIO %d for step PWM", gpioPins[ch]);
+            pwmGpio->closeChip();
+            return false;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(pwmStepMutex);
+        pwmDutyPercent[0] = 0.0;
+        pwmDutyPercent[1] = 0.0;
+        pwmStepPattern[0] = buildStepPattern(0.0);
+        pwmStepPattern[1] = buildStepPattern(0.0);
+        pwmStepIndex = 0;
+    }
+
+    try
+    {
+        pwmStepRunning = true;
+        pwmStepThread = std::thread(&AstrAlimHeater::runStepPwmLoop, this);
+    }
+    catch (const std::exception& e)
+    {
+        pwmStepRunning = false;
+        LOGF_ERROR("Failed to start step PWM thread: %s", e.what());
+        pwmGpio->closeChip();
+        return false;
+    }
+    LOGF_INFO("Step PWM started: tick=%dms steps=%d (Heater1 GPIO%d, Heater2 GPIO%d)",
+              STEP_PWM_TICK_MS, STEP_PWM_STEP_COUNT, STEP_PWM_GPIO_H1, STEP_PWM_GPIO_H2);
+
     return true;
 }
 
 void AstrAlimHeater::closePWM()
 {
-    for (int ch = 0; ch < 2; ch++)
+    pwmStepRunning = false;
+    pwmStepCv.notify_all();
+
+    if (pwmStepThread.joinable())
     {
-        if (pwmEnabled[ch])
-        {
-            setPWMDuty(ch, 0);
-            
-            int pwmChannel = getPWMChannel(ch);
-            std::string enablePath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip) + "/pwm" + std::to_string(pwmChannel) + "/enable";
-            std::ofstream enableFile(enablePath);
-            if (enableFile.is_open())
-            {
-                enableFile << 0;
-                enableFile.close();
-            }
-            pwmEnabled[ch] = false;
-        }
+        pwmStepThread.join();
     }
+
+    if (pwmGpio && pwmGpio->isOpen())
+    {
+        pwmGpio->setValue(STEP_PWM_GPIO_H1, 0);
+        pwmGpio->setValue(STEP_PWM_GPIO_H2, 0);
+        pwmGpio->closeChip();
+    }
+
+    std::lock_guard<std::mutex> lock(pwmStepMutex);
+    pwmDutyPercent[0] = 0.0;
+    pwmDutyPercent[1] = 0.0;
+    pwmStepPattern[0] = buildStepPattern(0.0);
+    pwmStepPattern[1] = buildStepPattern(0.0);
+    pwmStepIndex = 0;
 }
 
 bool AstrAlimHeater::setPWMDuty(int channel, double percent)
 {
     if (channel < 0 || channel > 1)
         return false;
-    
+
     percent = std::max(0.0, std::min(100.0, percent));
-    
-    int pwmChannel = getPWMChannel(channel);
-    std::string dutyPath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip) + "/pwm" + std::to_string(pwmChannel) + "/duty_cycle";
-    
-    // Convert percent to nanoseconds (period is 1000000ns)
-    int dutyNs = static_cast<int>(percent * 10000);
-    
-    std::ofstream dutyFile(dutyPath);
-    if (dutyFile.is_open())
+
     {
-        dutyFile << dutyNs;
-        dutyFile.close();
-        return true;
+        std::lock_guard<std::mutex> lock(pwmStepMutex);
+        pwmDutyPercent[channel] = percent;
+        pwmStepPattern[channel] = buildStepPattern(percent);
     }
-    
-    return false;
+    pwmStepCv.notify_one();
+
+    return true;
+}
+
+void AstrAlimHeater::runStepPwmLoop()
+{
+    while (pwmStepRunning)
+    {
+        int valueH1 = 0;
+        int valueH2 = 0;
+        {
+            std::lock_guard<std::mutex> lock(pwmStepMutex);
+            valueH1 = pwmStepPattern[0][pwmStepIndex] ? 1 : 0;
+            valueH2 = pwmStepPattern[1][pwmStepIndex] ? 1 : 0;
+            pwmStepIndex = (pwmStepIndex + 1) % STEP_PWM_STEP_COUNT;
+        }
+
+        if (pwmGpio && pwmGpio->isOpen())
+        {
+            pwmGpio->setValue(STEP_PWM_GPIO_H1, valueH1);
+            pwmGpio->setValue(STEP_PWM_GPIO_H2, valueH2);
+        }
+
+        std::unique_lock<std::mutex> lock(pwmStepMutex);
+        pwmStepCv.wait_for(lock, std::chrono::milliseconds(STEP_PWM_TICK_MS),
+                           [this]() { return !pwmStepRunning.load(); });
+    }
+
+    if (pwmGpio && pwmGpio->isOpen())
+    {
+        pwmGpio->setValue(STEP_PWM_GPIO_H1, 0);
+        pwmGpio->setValue(STEP_PWM_GPIO_H2, 0);
+    }
 }
 
 // ==================== Temperature Sensors ====================
@@ -724,6 +714,9 @@ bool AstrAlimHeater::readBME280()
     
     std::string result = execCommand(
         "python3 -c \""
+        "import fcntl\n"
+        "lockf = open('/tmp/astradiy_i2c.lock', 'w')\n"
+        "fcntl.flock(lockf, fcntl.LOCK_EX)\n"
         "try:\n"
         "    from lib.bme280_lib import readBME280All\n"
         "    t,p,h = readBME280All()\n"
@@ -1883,9 +1876,6 @@ bool AstrAlimHeater::autoDetectSensor(int heaterChannel)
         return false;
     }
     
-    // Sauvegarder l'état actuel
-    ISState savedMode = modeSP[MODE_OFF].getState();
-    
     // Activer le mode MANUAL temporairement
     modeSP[MODE_OFF].setState(ISS_OFF);
     modeSP[MODE_MANUAL].setState(ISS_ON);
@@ -2017,28 +2007,53 @@ bool AstrAlimHeater::testSensorResponse(int heaterChannel, const std::string& se
 void AstrAlimHeater::readINA219()
 {
     // Read INA219 sensors for heaters (AstraPwm1 and AstraPwm2)
-    // Addresses: 0x49 (Heater 1), 0x4d (Heater 2)
-    // Format: voltage,current for each heater
+    // Addresses (INDI mapping): 0x4d (Heater 1), 0x49 (Heater 2)
+    // Format: voltage_mV;current_mA for each heater
+    // Use integer payload to avoid locale-dependent float parsing issues.
     std::string result = execCommand(
         "python3 -c \""
+        "import os\n"
         "import sys\n"
-        "sys.path.insert(0, '/opt/AstraDIY')\n"
-        "sys.path.insert(0, '/home/stellarmate')\n"
+        "import glob\n"
+        "import time\n"
+        "import fcntl\n"
+        "lockf = open('/tmp/astradiy_i2c.lock', 'w')\n"
+        "fcntl.flock(lockf, fcntl.LOCK_EX)\n"
+        "base_paths = [\n"
+        "    '/opt/AstraDIY/Software/pythonDrivers',\n"
+        "    '/opt/AstraDIY',\n"
+        "    '/opt/AstrAlim/Software/pythonDrivers',\n"
+        "    '/opt/AstrAlim',\n"
+        "    '/root/AstraDIY/Software/pythonDrivers',\n"
+        "    '/home/stellarmate/AstraDIY/Software/pythonDrivers',\n"
+        "    '/home/stellarmate/Documents/AstraDIY/Software/pythonDrivers',\n"
+        "]\n"
+        "dynamic_paths = glob.glob('/home/*/AstraDIY/Software/pythonDrivers') + glob.glob('/home/*/Documents/AstraDIY/Software/pythonDrivers')\n"
+        "for p in base_paths + dynamic_paths:\n"
+        "    if os.path.isdir(p) and p not in sys.path:\n"
+        "        sys.path.insert(0, p)\n"
         "try:\n"
         "    from lib.ina219 import INA219\n"
-        "    results = []\n"
-        "    for addr in [0x49, 0x4d]:\n"
-        "        try:\n"
-        "            ina = INA219(0.01, 6, busnum=1, address=addr)\n"
-        "            ina.configure()\n"
-        "            v = max(ina.voltage(), 0)\n"
-        "            c = max(ina.current()/1000, 0)\n"
-        "            results.append(f'{v:.3f},{c:.3f}')\n"
-        "        except:\n"
-        "            results.append('0,0')\n"
-        "    print('|'.join(results))\n"
+        "    def read_addr(addr):\n"
+        "        last_err = 'ERR'\n"
+        "        for _ in range(4):\n"
+        "            try:\n"
+        "                ina = INA219(0.01, 6, busnum=1, address=addr)\n"
+        "                ina.configure()\n"
+        "                v_mv = max(int(round(ina.voltage() * 1000.0)), 0)\n"
+        "                try:\n"
+        "                    i_ma = max(int(round(abs(ina.current()))), 0)\n"
+        "                    return f'1;{v_mv};{i_ma};OK'\n"
+        "                except Exception as current_err:\n"
+        "                    return f'1;{v_mv};-1;CUR_{current_err.__class__.__name__}'\n"
+        "            except Exception as sample_err:\n"
+        "                last_err = f'IO_{sample_err.__class__.__name__}'\n"
+        "                time.sleep(0.01)\n"
+        "        return f'0;0;0;{last_err}'\n"
+        "    print('|'.join(read_addr(addr) for addr in [0x4d, 0x49]))\n"
         "except Exception as e:\n"
-        "    print('0,0|0,0')\n"
+        "    err = f'IMPORT_{e.__class__.__name__}'\n"
+        "    print(f'0;0;0;{err}|0;0;0;{err}')\n"
         "\" 2>/dev/null"
     );
     
@@ -2049,37 +2064,151 @@ void AstrAlimHeater::readINA219()
         return;
     }
     
-    // Parse result: v1,c1|v2,c2
+    // Parse result: ok;v1_mV;i1_mA;err|ok;v2_mV;i2_mA;err
     std::istringstream iss(result);
     std::string heaterData;
     
-    // Heater 1 (AstraPwm1, address 0x49, GPIO 18, PWM channel 1)
+    auto parseSample = [](const std::string& input, bool& valid, bool& currentValid, double& voltage, double& current, std::string& errorTag)
+    {
+        int ok = 0;
+        long vMilli = 0;
+        long cMilli = 0;
+        char errBuf[96] = {0};
+        int parsedCount = sscanf(input.c_str(), "%d;%ld;%ld;%95s", &ok, &vMilli, &cMilli, errBuf);
+        if (parsedCount >= 3)
+        {
+            valid = (ok == 1);
+            voltage = std::max(0.0, static_cast<double>(vMilli) / 1000.0);
+            currentValid = valid && (cMilli >= 0);
+            current = currentValid ? std::max(0.0, static_cast<double>(cMilli) / 1000.0) : 0.0;
+            if (parsedCount == 4 && errBuf[0] != '\0')
+                errorTag = errBuf;
+            else if (!valid)
+                errorTag = "INVALID";
+            else if (!currentValid)
+                errorTag = "CUR_MISSING";
+            else
+                errorTag = "OK";
+            return;
+        }
+        valid = false;
+        currentValid = false;
+        voltage = 0.0;
+        current = 0.0;
+        errorTag = "PARSE";
+    };
+
+    bool valid1 = false;
+    bool valid2 = false;
+    bool currentValid1 = false;
+    bool currentValid2 = false;
+    double sampleV1 = 0.0;
+    double sampleI1 = 0.0;
+    double sampleV2 = 0.0;
+    double sampleI2 = 0.0;
+    std::string errorTag1 = "MISSING";
+    std::string errorTag2 = "MISSING";
+
+    // Heater 1 (INDI mapped to address 0x4d)
     if (std::getline(iss, heaterData, '|'))
     {
-        double v = 0, c = 0;
-        sscanf(heaterData.c_str(), "%lf,%lf", &v, &c);
-        PowerMonitorNP[PWR_VOLTAGE1].setValue(v);
-        PowerMonitorNP[PWR_CURRENT1].setValue(c);
-    }
-    else
-    {
-        PowerMonitorNP[PWR_VOLTAGE1].setValue(0);
-        PowerMonitorNP[PWR_CURRENT1].setValue(0);
+        parseSample(heaterData, valid1, currentValid1, sampleV1, sampleI1, errorTag1);
     }
     
-    // Heater 2 (AstraPwm2, address 0x4d, GPIO 13, PWM channel 2)
+    // Heater 2 (INDI mapped to address 0x49)
     if (std::getline(iss, heaterData, '|'))
     {
-        double v = 0, c = 0;
-        sscanf(heaterData.c_str(), "%lf,%lf", &v, &c);
-        PowerMonitorNP[PWR_VOLTAGE2].setValue(v);
-        PowerMonitorNP[PWR_CURRENT2].setValue(c);
+        parseSample(heaterData, valid2, currentValid2, sampleV2, sampleI2, errorTag2);
     }
-    else
+
+    const bool heater1Active = (Heater1PowerNP[0].getValue() > 1.0);
+    const bool heater2Active = (Heater2PowerNP[0].getValue() > 1.0);
+
+    auto now = std::chrono::steady_clock::now();
+    auto handleNoResponseReset = [this, now](int ch, bool validSample, bool heaterActive)
     {
-        PowerMonitorNP[PWR_VOLTAGE2].setValue(0);
-        PowerMonitorNP[PWR_CURRENT2].setValue(0);
-    }
+        if (validSample)
+        {
+            inaNoResponseActive[ch] = false;
+            return;
+        }
+
+        // Only attempt bus-level recovery when channel is actually in use
+        // or already had valid telemetry before.
+        if (!heaterActive && !inaHasSample[ch])
+            return;
+
+        if (!inaNoResponseActive[ch])
+        {
+            inaNoResponseActive[ch] = true;
+            inaNoResponseSince[ch] = now;
+            return;
+        }
+
+        auto silenceMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - inaNoResponseSince[ch]).count();
+        if (silenceMs < INA_NO_RESPONSE_RESET_DELAY_MS)
+            return;
+
+        auto sinceLastResetMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - inaLastResetAttempt[ch]).count();
+        if (sinceLastResetMs < INA_RESET_COOLDOWN_MS)
+            return;
+
+        inaLastResetAttempt[ch] = now;
+        bool resetOk = resetINAChannel(ch);
+        inaNoResponseSince[ch] = now;
+        if (resetOk)
+        {
+            LOGF_WARN("Heater %d INA no response for >= %dms: reset sent on address 0x%02x",
+                      ch + 1, INA_NO_RESPONSE_RESET_DELAY_MS, (ch == 0) ? INA_ADDR_H1 : INA_ADDR_H2);
+        }
+        else
+        {
+            LOGF_WARN("Heater %d INA no response: reset failed on address 0x%02x",
+                      ch + 1, (ch == 0) ? INA_ADDR_H1 : INA_ADDR_H2);
+        }
+    };
+
+    handleNoResponseReset(0, valid1, heater1Active);
+    handleNoResponseReset(1, valid2, heater2Active);
+
+    auto logINAStatus = [this](int ch, bool sampleValid, bool sampleCurrentValid, const std::string& tag, bool heaterActive)
+    {
+        if (sampleValid && sampleCurrentValid)
+        {
+            inaLastErrorTag[ch].clear();
+            inaErrorLogCount[ch] = 0;
+            return;
+        }
+
+        if (!heaterActive)
+            return;
+
+        std::string effectiveTag = tag.empty() ? "UNKNOWN" : tag;
+        if (inaLastErrorTag[ch] != effectiveTag)
+        {
+            inaLastErrorTag[ch] = effectiveTag;
+            inaErrorLogCount[ch] = 1;
+            LOGF_WARN("Heater %d INA unstable (%s). Keeping last informative values.", ch + 1, effectiveTag.c_str());
+            return;
+        }
+
+        inaErrorLogCount[ch]++;
+        if ((inaErrorLogCount[ch] % INA_LOG_REPEAT_CYCLES) == 0)
+        {
+            LOGF_WARN("Heater %d INA still unstable (%s) x%d", ch + 1, effectiveTag.c_str(), inaErrorLogCount[ch]);
+        }
+    };
+
+    logINAStatus(0, valid1, currentValid1, errorTag1, heater1Active);
+    logINAStatus(1, valid2, currentValid2, errorTag2, heater2Active);
+
+    applyINAChannelSample(0, valid1, currentValid1, sampleV1, sampleI1, heater1Active);
+    applyINAChannelSample(1, valid2, currentValid2, sampleV2, sampleI2, heater2Active);
+
+    PowerMonitorNP[PWR_VOLTAGE1].setValue(inaDisplayVoltage[0]);
+    PowerMonitorNP[PWR_CURRENT1].setValue(inaDisplayCurrent[0]);
+    PowerMonitorNP[PWR_VOLTAGE2].setValue(inaDisplayVoltage[1]);
+    PowerMonitorNP[PWR_CURRENT2].setValue(inaDisplayCurrent[1]);
     
     // Set state based on whether we have valid readings
     bool hasData = (PowerMonitorNP[PWR_VOLTAGE1].getValue() > 0 || 
@@ -2088,4 +2217,119 @@ void AstrAlimHeater::readINA219()
                     PowerMonitorNP[PWR_CURRENT2].getValue() > 0);
     PowerMonitorNP.setState(hasData ? IPS_OK : IPS_IDLE);
     PowerMonitorNP.apply();
+}
+
+bool AstrAlimHeater::resetINAChannel(int channel)
+{
+    if (channel < 0 || channel > 1)
+        return false;
+
+    const int addr = (channel == 0) ? INA_ADDR_H1 : INA_ADDR_H2;
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd),
+             "python3 -c \"import fcntl,smbus,time; lockf=open('/tmp/astradiy_i2c.lock','w'); fcntl.flock(lockf, fcntl.LOCK_EX); bus=smbus.SMBus(1); bus.write_i2c_block_data(0x%02x, 0x00, [0x80, 0x00]); time.sleep(0.02); print('ok')\" 2>/dev/null",
+             addr);
+    std::string result = execCommand(cmd);
+    return result == "ok";
+}
+
+void AstrAlimHeater::resetINADisplayState()
+{
+    auto now = std::chrono::steady_clock::now();
+    for (int ch = 0; ch < 2; ch++)
+    {
+        inaDisplayVoltage[ch] = 0.0;
+        inaDisplayCurrent[ch] = 0.0;
+        inaHasSample[ch] = false;
+        inaInvalidCount[ch] = 0;
+        inaZeroWhileActiveCount[ch] = 0;
+        inaLastErrorTag[ch].clear();
+        inaErrorLogCount[ch] = 0;
+        inaNoResponseActive[ch] = false;
+        inaNoResponseSince[ch] = now;
+        inaLastResetAttempt[ch] = now - std::chrono::milliseconds(INA_RESET_COOLDOWN_MS);
+    }
+}
+
+void AstrAlimHeater::applyINAChannelSample(int channel, bool validSample, bool currentValid, double sampleVoltage, double sampleCurrent, bool heaterActive)
+{
+    if (channel < 0 || channel > 1)
+        return;
+
+    if (!validSample)
+    {
+        inaInvalidCount[channel]++;
+
+        if (heaterActive && !inaHasSample[channel] && inaInvalidCount[channel] >= INA_STARTUP_FALLBACK_CYCLES)
+        {
+            inaDisplayVoltage[channel] = std::max(inaDisplayVoltage[channel], 12.0);
+            inaDisplayCurrent[channel] = std::max(inaDisplayCurrent[channel], 0.0);
+            inaHasSample[channel] = true;
+        }
+
+        if (!inaHasSample[channel])
+            return;
+
+        if (!heaterActive && inaInvalidCount[channel] >= 2)
+        {
+            inaDisplayVoltage[channel] *= 0.60;
+            inaDisplayCurrent[channel] *= 0.60;
+            if (inaDisplayVoltage[channel] < 0.05)
+                inaDisplayVoltage[channel] = 0.0;
+            if (inaDisplayCurrent[channel] < 0.01)
+                inaDisplayCurrent[channel] = 0.0;
+        }
+
+        if (inaInvalidCount[channel] >= INA_INVALID_RESET_CYCLES)
+        {
+            inaDisplayVoltage[channel] = 0.0;
+            inaDisplayCurrent[channel] = 0.0;
+            inaHasSample[channel] = false;
+        }
+        return;
+    }
+
+    inaInvalidCount[channel] = 0;
+    sampleVoltage = std::max(0.0, sampleVoltage);
+    sampleCurrent = std::max(0.0, sampleCurrent);
+
+    const double currentForNearZero = currentValid ? sampleCurrent : inaDisplayCurrent[channel];
+    const bool nearZeroSample = (sampleVoltage < 0.20 && currentForNearZero < 0.02);
+    if (heaterActive && nearZeroSample && inaHasSample[channel] && inaDisplayCurrent[channel] > 0.05)
+    {
+        inaZeroWhileActiveCount[channel]++;
+        if (inaZeroWhileActiveCount[channel] <= INA_ZERO_GLITCH_HOLD_CYCLES)
+            return;
+    }
+    else
+    {
+        inaZeroWhileActiveCount[channel] = 0;
+    }
+
+    if (!inaHasSample[channel])
+    {
+        inaDisplayVoltage[channel] = sampleVoltage;
+        inaDisplayCurrent[channel] = currentValid ? sampleCurrent : inaDisplayCurrent[channel];
+        inaHasSample[channel] = true;
+        return;
+    }
+
+    const double alpha = heaterActive ? INA_FILTER_ALPHA_ACTIVE : INA_FILTER_ALPHA_IDLE;
+    inaDisplayVoltage[channel] = (alpha * sampleVoltage) + ((1.0 - alpha) * inaDisplayVoltage[channel]);
+    if (currentValid)
+    {
+        inaDisplayCurrent[channel] = (alpha * sampleCurrent) + ((1.0 - alpha) * inaDisplayCurrent[channel]);
+    }
+    else if (!heaterActive)
+    {
+        inaDisplayCurrent[channel] *= (1.0 - alpha);
+    }
+
+    if (!heaterActive && nearZeroSample)
+    {
+        if (inaDisplayVoltage[channel] < 0.05)
+            inaDisplayVoltage[channel] = 0.0;
+        if (inaDisplayCurrent[channel] < 0.01)
+            inaDisplayCurrent[channel] = 0.0;
+    }
 }
