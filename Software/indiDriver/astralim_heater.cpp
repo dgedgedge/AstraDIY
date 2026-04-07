@@ -1871,9 +1871,6 @@ bool AstrAlimHeater::autoDetectSensor(int heaterChannel)
         return false;
     }
     
-    // Sauvegarder l'état actuel
-    ISState savedMode = modeSP[MODE_OFF].getState();
-    
     // Activer le mode MANUAL temporairement
     modeSP[MODE_OFF].setState(ISS_OFF);
     modeSP[MODE_MANUAL].setState(ISS_ON);
