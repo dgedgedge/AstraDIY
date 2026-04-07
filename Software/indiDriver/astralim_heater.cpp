@@ -286,6 +286,7 @@ bool AstrAlimHeater::Connect()
     Heater2PowerNP.apply();
     
     // Initial readings
+    resetINADisplayState();
     readBME280();
     readDS18B20Sensors();
     
@@ -310,6 +311,7 @@ bool AstrAlimHeater::Disconnect()
     setPWMDuty(1, 0);
     
     closePWM();
+    resetINADisplayState();
     
     LOG_INFO("AstrAlim Heater disconnected");
     return true;
@@ -2019,12 +2021,12 @@ void AstrAlimHeater::readINA219()
         "            ina.configure()\n"
         "            v_mv = max(int(round(ina.voltage() * 1000.0)), 0)\n"
         "            i_ma = max(int(round(abs(ina.current()))), 0)\n"
-        "            results.append(f'{v_mv};{i_ma}')\n"
+        "            results.append(f'1;{v_mv};{i_ma}')\n"
         "        except:\n"
-        "            results.append('0;0')\n"
+        "            results.append('0;0;0')\n"
         "    print('|'.join(results))\n"
         "except Exception as e:\n"
-        "    print('0;0|0;0')\n"
+        "    print('0;0;0|0;0;0')\n"
         "\" 2>/dev/null"
     );
     
@@ -2035,49 +2037,55 @@ void AstrAlimHeater::readINA219()
         return;
     }
     
-    // Parse result: v1_mV;i1_mA|v2_mV;i2_mA
+    // Parse result: ok;v1_mV;i1_mA|ok;v2_mV;i2_mA
     std::istringstream iss(result);
     std::string heaterData;
     
+    auto parseSample = [](const std::string& input, bool& valid, double& voltage, double& current)
+    {
+        int ok = 0;
+        long vMilli = 0;
+        long cMilli = 0;
+        if (sscanf(input.c_str(), "%d;%ld;%ld", &ok, &vMilli, &cMilli) == 3)
+        {
+            valid = (ok == 1);
+            voltage = std::max(0.0, static_cast<double>(vMilli) / 1000.0);
+            current = std::max(0.0, static_cast<double>(cMilli) / 1000.0);
+            return;
+        }
+        valid = false;
+        voltage = 0.0;
+        current = 0.0;
+    };
+
+    bool valid1 = false;
+    bool valid2 = false;
+    double sampleV1 = 0.0;
+    double sampleI1 = 0.0;
+    double sampleV2 = 0.0;
+    double sampleI2 = 0.0;
+
     // Heater 1 (AstraPwm1, address 0x49, GPIO 18, PWM channel 1)
     if (std::getline(iss, heaterData, '|'))
     {
-        long vMilli = 0, cMilli = 0;
-        if (sscanf(heaterData.c_str(), "%ld;%ld", &vMilli, &cMilli) != 2)
-        {
-            vMilli = 0;
-            cMilli = 0;
-        }
-        double v = static_cast<double>(vMilli) / 1000.0;
-        double c = static_cast<double>(cMilli) / 1000.0;
-        PowerMonitorNP[PWR_VOLTAGE1].setValue(v);
-        PowerMonitorNP[PWR_CURRENT1].setValue(c);
-    }
-    else
-    {
-        PowerMonitorNP[PWR_VOLTAGE1].setValue(0);
-        PowerMonitorNP[PWR_CURRENT1].setValue(0);
+        parseSample(heaterData, valid1, sampleV1, sampleI1);
     }
     
     // Heater 2 (AstraPwm2, address 0x4d, GPIO 13, PWM channel 2)
     if (std::getline(iss, heaterData, '|'))
     {
-        long vMilli = 0, cMilli = 0;
-        if (sscanf(heaterData.c_str(), "%ld;%ld", &vMilli, &cMilli) != 2)
-        {
-            vMilli = 0;
-            cMilli = 0;
-        }
-        double v = static_cast<double>(vMilli) / 1000.0;
-        double c = static_cast<double>(cMilli) / 1000.0;
-        PowerMonitorNP[PWR_VOLTAGE2].setValue(v);
-        PowerMonitorNP[PWR_CURRENT2].setValue(c);
+        parseSample(heaterData, valid2, sampleV2, sampleI2);
     }
-    else
-    {
-        PowerMonitorNP[PWR_VOLTAGE2].setValue(0);
-        PowerMonitorNP[PWR_CURRENT2].setValue(0);
-    }
+
+    const bool heater1Active = (Heater1PowerNP[0].getValue() > 1.0);
+    const bool heater2Active = (Heater2PowerNP[0].getValue() > 1.0);
+    applyINAChannelSample(0, valid1, sampleV1, sampleI1, heater1Active);
+    applyINAChannelSample(1, valid2, sampleV2, sampleI2, heater2Active);
+
+    PowerMonitorNP[PWR_VOLTAGE1].setValue(inaDisplayVoltage[0]);
+    PowerMonitorNP[PWR_CURRENT1].setValue(inaDisplayCurrent[0]);
+    PowerMonitorNP[PWR_VOLTAGE2].setValue(inaDisplayVoltage[1]);
+    PowerMonitorNP[PWR_CURRENT2].setValue(inaDisplayCurrent[1]);
     
     // Set state based on whether we have valid readings
     bool hasData = (PowerMonitorNP[PWR_VOLTAGE1].getValue() > 0 || 
@@ -2086,4 +2094,83 @@ void AstrAlimHeater::readINA219()
                     PowerMonitorNP[PWR_CURRENT2].getValue() > 0);
     PowerMonitorNP.setState(hasData ? IPS_OK : IPS_IDLE);
     PowerMonitorNP.apply();
+}
+
+void AstrAlimHeater::resetINADisplayState()
+{
+    for (int ch = 0; ch < 2; ch++)
+    {
+        inaDisplayVoltage[ch] = 0.0;
+        inaDisplayCurrent[ch] = 0.0;
+        inaHasSample[ch] = false;
+        inaInvalidCount[ch] = 0;
+        inaZeroWhileActiveCount[ch] = 0;
+    }
+}
+
+void AstrAlimHeater::applyINAChannelSample(int channel, bool validSample, double sampleVoltage, double sampleCurrent, bool heaterActive)
+{
+    if (channel < 0 || channel > 1)
+        return;
+
+    if (!validSample)
+    {
+        inaInvalidCount[channel]++;
+        if (!inaHasSample[channel])
+            return;
+
+        if (!heaterActive && inaInvalidCount[channel] >= 2)
+        {
+            inaDisplayVoltage[channel] *= 0.60;
+            inaDisplayCurrent[channel] *= 0.60;
+            if (inaDisplayVoltage[channel] < 0.05)
+                inaDisplayVoltage[channel] = 0.0;
+            if (inaDisplayCurrent[channel] < 0.01)
+                inaDisplayCurrent[channel] = 0.0;
+        }
+
+        if (inaInvalidCount[channel] >= INA_INVALID_RESET_CYCLES)
+        {
+            inaDisplayVoltage[channel] = 0.0;
+            inaDisplayCurrent[channel] = 0.0;
+            inaHasSample[channel] = false;
+        }
+        return;
+    }
+
+    inaInvalidCount[channel] = 0;
+    sampleVoltage = std::max(0.0, sampleVoltage);
+    sampleCurrent = std::max(0.0, sampleCurrent);
+
+    const bool nearZeroSample = (sampleVoltage < 0.20 && sampleCurrent < 0.02);
+    if (heaterActive && nearZeroSample && inaHasSample[channel] && inaDisplayCurrent[channel] > 0.05)
+    {
+        inaZeroWhileActiveCount[channel]++;
+        if (inaZeroWhileActiveCount[channel] <= INA_ZERO_GLITCH_HOLD_CYCLES)
+            return;
+    }
+    else
+    {
+        inaZeroWhileActiveCount[channel] = 0;
+    }
+
+    if (!inaHasSample[channel])
+    {
+        inaDisplayVoltage[channel] = sampleVoltage;
+        inaDisplayCurrent[channel] = sampleCurrent;
+        inaHasSample[channel] = true;
+        return;
+    }
+
+    const double alpha = heaterActive ? INA_FILTER_ALPHA_ACTIVE : INA_FILTER_ALPHA_IDLE;
+    inaDisplayVoltage[channel] = (alpha * sampleVoltage) + ((1.0 - alpha) * inaDisplayVoltage[channel]);
+    inaDisplayCurrent[channel] = (alpha * sampleCurrent) + ((1.0 - alpha) * inaDisplayCurrent[channel]);
+
+    if (!heaterActive && nearZeroSample)
+    {
+        if (inaDisplayVoltage[channel] < 0.05)
+            inaDisplayVoltage[channel] = 0.0;
+        if (inaDisplayCurrent[channel] < 0.01)
+            inaDisplayCurrent[channel] = 0.0;
+    }
 }

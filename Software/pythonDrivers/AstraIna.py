@@ -47,6 +47,9 @@ class AstraIna(AstraComDevice):
             "AstOnStep": {"ispwm":False, "busnum":1, "address": 0x40, "shunt_ohms": 0.005, "max_expected_amps": 6, "chip":None, "pwm":2, 
                          "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT }
     }
+    MIN_VALID_SAMPLES_ABS = 3
+    MIN_VALID_SAMPLES_RATIO = 0.40
+    PUBLISH_SMOOTH_ALPHA = 0.35
 
     @classmethod
     def getListNames(cls):
@@ -265,10 +268,28 @@ class AstraIna(AstraComDevice):
         if self._cycleSampleCount <= 0:
             return
 
-        self._publishedVoltageV = self._cycleVoltageSumV / self._cycleSampleCount
-        self._publishedShuntVoltagemV = self._cycleShuntVoltageSummV / self._cycleSampleCount
-        self._publishedCurrentmA = self._cycleCurrentSummA / self._cycleSampleCount
-        self._publishedPowermW = self._cyclePowerSummW / self._cycleSampleCount
+        if self.eachStep:
+            cycle_steps = self.cycleStepCount if isinstance(self.cycleStepCount, int) and self.cycleStepCount > 0 else 10
+            min_samples = max(self.MIN_VALID_SAMPLES_ABS, int(round(cycle_steps * self.MIN_VALID_SAMPLES_RATIO)))
+            if self._cycleSampleCount < min_samples:
+                return
+
+        avg_voltage_v = self._cycleVoltageSumV / self._cycleSampleCount
+        avg_shunt_mv = self._cycleShuntVoltageSummV / self._cycleSampleCount
+        avg_current_ma = self._cycleCurrentSummA / self._cycleSampleCount
+        avg_power_mw = self._cyclePowerSummW / self._cycleSampleCount
+
+        if self.eachStep and (abs(self._publishedVoltageV) > 0.0 or abs(self._publishedCurrentmA) > 0.0):
+            alpha = self.PUBLISH_SMOOTH_ALPHA
+            self._publishedVoltageV = (alpha * avg_voltage_v) + ((1.0 - alpha) * self._publishedVoltageV)
+            self._publishedShuntVoltagemV = (alpha * avg_shunt_mv) + ((1.0 - alpha) * self._publishedShuntVoltagemV)
+            self._publishedCurrentmA = (alpha * avg_current_ma) + ((1.0 - alpha) * self._publishedCurrentmA)
+            self._publishedPowermW = (alpha * avg_power_mw) + ((1.0 - alpha) * self._publishedPowermW)
+        else:
+            self._publishedVoltageV = avg_voltage_v
+            self._publishedShuntVoltagemV = avg_shunt_mv
+            self._publishedCurrentmA = avg_current_ma
+            self._publishedPowermW = avg_power_mw
 
     def _accumulateCycleAndPublish(self, step: int) -> None:
         """Accumulate on each-step devices, publish immediately on non-each-step devices."""
@@ -521,4 +542,3 @@ if __name__ == "__main__":
                 currentA = current / 1000.0
 
                 print(f"{name}: Shunt {shunt_voltage:+.3f}mV, Bus {bus_voltage:+.3f}V Current: {currentA:+.3f}A, Power: {power:.3f}mW")
-
