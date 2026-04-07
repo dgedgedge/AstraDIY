@@ -2007,7 +2007,7 @@ bool AstrAlimHeater::testSensorResponse(int heaterChannel, const std::string& se
 void AstrAlimHeater::readINA219()
 {
     // Read INA219 sensors for heaters (AstraPwm1 and AstraPwm2)
-    // Addresses: 0x49 (Heater 1), 0x4d (Heater 2)
+    // Addresses (INDI mapping): 0x4d (Heater 1), 0x49 (Heater 2)
     // Format: voltage_mV;current_mA for each heater
     // Use integer payload to avoid locale-dependent float parsing issues.
     std::string result = execCommand(
@@ -2050,7 +2050,7 @@ void AstrAlimHeater::readINA219()
         "                last_err = f'IO_{sample_err.__class__.__name__}'\n"
         "                time.sleep(0.01)\n"
         "        return f'0;0;0;{last_err}'\n"
-        "    print('|'.join(read_addr(addr) for addr in [0x49, 0x4d]))\n"
+        "    print('|'.join(read_addr(addr) for addr in [0x4d, 0x49]))\n"
         "except Exception as e:\n"
         "    err = f'IMPORT_{e.__class__.__name__}'\n"
         "    print(f'0;0;0;{err}|0;0;0;{err}')\n"
@@ -2109,13 +2109,13 @@ void AstrAlimHeater::readINA219()
     std::string errorTag1 = "MISSING";
     std::string errorTag2 = "MISSING";
 
-    // Heater 1 (AstraPwm1, address 0x49, GPIO 18, PWM channel 1)
+    // Heater 1 (INDI mapped to address 0x4d)
     if (std::getline(iss, heaterData, '|'))
     {
         parseSample(heaterData, valid1, currentValid1, sampleV1, sampleI1, errorTag1);
     }
     
-    // Heater 2 (AstraPwm2, address 0x4d, GPIO 13, PWM channel 2)
+    // Heater 2 (INDI mapped to address 0x49)
     if (std::getline(iss, heaterData, '|'))
     {
         parseSample(heaterData, valid2, currentValid2, sampleV2, sampleI2, errorTag2);

@@ -193,8 +193,8 @@ private:
     static constexpr int INA_LOG_REPEAT_CYCLES = 6;
     static constexpr int INA_NO_RESPONSE_RESET_DELAY_MS = 5000;
     static constexpr int INA_RESET_COOLDOWN_MS = 5000;
-    static constexpr int INA_ADDR_H1 = 0x49;
-    static constexpr int INA_ADDR_H2 = 0x4d;
+    static constexpr int INA_ADDR_H1 = 0x4d;
+    static constexpr int INA_ADDR_H2 = 0x49;
     static constexpr double DEFAULT_KP = 2.0;
     static constexpr double DEFAULT_KI = 0.1;
     static constexpr double DEFAULT_KD = 0.5;
