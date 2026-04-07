@@ -2012,6 +2012,7 @@ void AstrAlimHeater::readINA219()
         "import os\n"
         "import sys\n"
         "import glob\n"
+        "import time\n"
         "base_paths = [\n"
         "    '/opt/AstraDIY/Software/pythonDrivers',\n"
         "    '/opt/AstraDIY',\n"
@@ -2027,19 +2028,26 @@ void AstrAlimHeater::readINA219()
         "        sys.path.insert(0, p)\n"
         "try:\n"
         "    from lib.ina219 import INA219\n"
-        "    results = []\n"
-        "    for addr in [0x49, 0x4d]:\n"
-        "        try:\n"
-        "            ina = INA219(0.01, 6, busnum=1, address=addr)\n"
-        "            ina.configure()\n"
-        "            v_mv = max(int(round(ina.voltage() * 1000.0)), 0)\n"
-        "            i_ma = max(int(round(abs(ina.current()))), 0)\n"
-        "            results.append(f'1;{v_mv};{i_ma}')\n"
-        "        except:\n"
-        "            results.append('0;0;0')\n"
-        "    print('|'.join(results))\n"
+        "    def read_addr(addr):\n"
+        "        last_err = 'ERR'\n"
+        "        for _ in range(4):\n"
+        "            try:\n"
+        "                ina = INA219(0.01, 6, busnum=1, address=addr)\n"
+        "                ina.configure()\n"
+        "                v_mv = max(int(round(ina.voltage() * 1000.0)), 0)\n"
+        "                try:\n"
+        "                    i_ma = max(int(round(abs(ina.current()))), 0)\n"
+        "                    return f'1;{v_mv};{i_ma};OK'\n"
+        "                except Exception as current_err:\n"
+        "                    return f'1;{v_mv};-1;CUR_{current_err.__class__.__name__}'\n"
+        "            except Exception as sample_err:\n"
+        "                last_err = f'IO_{sample_err.__class__.__name__}'\n"
+        "                time.sleep(0.01)\n"
+        "        return f'0;0;0;{last_err}'\n"
+        "    print('|'.join(read_addr(addr) for addr in [0x49, 0x4d]))\n"
         "except Exception as e:\n"
-        "    print('0;0;0|0;0;0')\n"
+        "    err = f'IMPORT_{e.__class__.__name__}'\n"
+        "    print(f'0;0;0;{err}|0;0;0;{err}')\n"
         "\" 2>/dev/null"
     );
     
@@ -2050,50 +2058,98 @@ void AstrAlimHeater::readINA219()
         return;
     }
     
-    // Parse result: ok;v1_mV;i1_mA|ok;v2_mV;i2_mA
+    // Parse result: ok;v1_mV;i1_mA;err|ok;v2_mV;i2_mA;err
     std::istringstream iss(result);
     std::string heaterData;
     
-    auto parseSample = [](const std::string& input, bool& valid, double& voltage, double& current)
+    auto parseSample = [](const std::string& input, bool& valid, bool& currentValid, double& voltage, double& current, std::string& errorTag)
     {
         int ok = 0;
         long vMilli = 0;
         long cMilli = 0;
-        if (sscanf(input.c_str(), "%d;%ld;%ld", &ok, &vMilli, &cMilli) == 3)
+        char errBuf[96] = {0};
+        int parsedCount = sscanf(input.c_str(), "%d;%ld;%ld;%95s", &ok, &vMilli, &cMilli, errBuf);
+        if (parsedCount >= 3)
         {
             valid = (ok == 1);
             voltage = std::max(0.0, static_cast<double>(vMilli) / 1000.0);
-            current = std::max(0.0, static_cast<double>(cMilli) / 1000.0);
+            currentValid = valid && (cMilli >= 0);
+            current = currentValid ? std::max(0.0, static_cast<double>(cMilli) / 1000.0) : 0.0;
+            if (parsedCount == 4 && errBuf[0] != '\0')
+                errorTag = errBuf;
+            else if (!valid)
+                errorTag = "INVALID";
+            else if (!currentValid)
+                errorTag = "CUR_MISSING";
+            else
+                errorTag = "OK";
             return;
         }
         valid = false;
+        currentValid = false;
         voltage = 0.0;
         current = 0.0;
+        errorTag = "PARSE";
     };
 
     bool valid1 = false;
     bool valid2 = false;
+    bool currentValid1 = false;
+    bool currentValid2 = false;
     double sampleV1 = 0.0;
     double sampleI1 = 0.0;
     double sampleV2 = 0.0;
     double sampleI2 = 0.0;
+    std::string errorTag1 = "MISSING";
+    std::string errorTag2 = "MISSING";
 
     // Heater 1 (AstraPwm1, address 0x49, GPIO 18, PWM channel 1)
     if (std::getline(iss, heaterData, '|'))
     {
-        parseSample(heaterData, valid1, sampleV1, sampleI1);
+        parseSample(heaterData, valid1, currentValid1, sampleV1, sampleI1, errorTag1);
     }
     
     // Heater 2 (AstraPwm2, address 0x4d, GPIO 13, PWM channel 2)
     if (std::getline(iss, heaterData, '|'))
     {
-        parseSample(heaterData, valid2, sampleV2, sampleI2);
+        parseSample(heaterData, valid2, currentValid2, sampleV2, sampleI2, errorTag2);
     }
 
     const bool heater1Active = (Heater1PowerNP[0].getValue() > 1.0);
     const bool heater2Active = (Heater2PowerNP[0].getValue() > 1.0);
-    applyINAChannelSample(0, valid1, sampleV1, sampleI1, heater1Active);
-    applyINAChannelSample(1, valid2, sampleV2, sampleI2, heater2Active);
+    auto logINAStatus = [this](int ch, bool sampleValid, bool sampleCurrentValid, const std::string& tag, bool heaterActive)
+    {
+        if (sampleValid && sampleCurrentValid)
+        {
+            inaLastErrorTag[ch].clear();
+            inaErrorLogCount[ch] = 0;
+            return;
+        }
+
+        if (!heaterActive)
+            return;
+
+        std::string effectiveTag = tag.empty() ? "UNKNOWN" : tag;
+        if (inaLastErrorTag[ch] != effectiveTag)
+        {
+            inaLastErrorTag[ch] = effectiveTag;
+            inaErrorLogCount[ch] = 1;
+            LOGF_WARN("Heater %d INA unstable (%s). Keeping last informative values.", ch + 1, effectiveTag.c_str());
+            return;
+        }
+
+        inaErrorLogCount[ch]++;
+        if ((inaErrorLogCount[ch] % INA_LOG_REPEAT_CYCLES) == 0)
+        {
+            LOGF_WARN("Heater %d INA still unstable (%s) x%d", ch + 1, effectiveTag.c_str(), inaErrorLogCount[ch]);
+        }
+    };
+
+    logINAStatus(0, valid1, currentValid1, errorTag1, heater1Active);
+    logINAStatus(1, valid2, currentValid2, errorTag2, heater2Active);
+
+    applyINAChannelSample(0, valid1, currentValid1, sampleV1, sampleI1, heater1Active);
+    applyINAChannelSample(1, valid2, currentValid2, sampleV2, sampleI2, heater2Active);
 
     PowerMonitorNP[PWR_VOLTAGE1].setValue(inaDisplayVoltage[0]);
     PowerMonitorNP[PWR_CURRENT1].setValue(inaDisplayCurrent[0]);
@@ -2118,10 +2174,12 @@ void AstrAlimHeater::resetINADisplayState()
         inaHasSample[ch] = false;
         inaInvalidCount[ch] = 0;
         inaZeroWhileActiveCount[ch] = 0;
+        inaLastErrorTag[ch].clear();
+        inaErrorLogCount[ch] = 0;
     }
 }
 
-void AstrAlimHeater::applyINAChannelSample(int channel, bool validSample, double sampleVoltage, double sampleCurrent, bool heaterActive)
+void AstrAlimHeater::applyINAChannelSample(int channel, bool validSample, bool currentValid, double sampleVoltage, double sampleCurrent, bool heaterActive)
 {
     if (channel < 0 || channel > 1)
         return;
@@ -2129,6 +2187,14 @@ void AstrAlimHeater::applyINAChannelSample(int channel, bool validSample, double
     if (!validSample)
     {
         inaInvalidCount[channel]++;
+
+        if (heaterActive && !inaHasSample[channel] && inaInvalidCount[channel] >= INA_STARTUP_FALLBACK_CYCLES)
+        {
+            inaDisplayVoltage[channel] = std::max(inaDisplayVoltage[channel], 12.0);
+            inaDisplayCurrent[channel] = std::max(inaDisplayCurrent[channel], 0.0);
+            inaHasSample[channel] = true;
+        }
+
         if (!inaHasSample[channel])
             return;
 
@@ -2155,7 +2221,8 @@ void AstrAlimHeater::applyINAChannelSample(int channel, bool validSample, double
     sampleVoltage = std::max(0.0, sampleVoltage);
     sampleCurrent = std::max(0.0, sampleCurrent);
 
-    const bool nearZeroSample = (sampleVoltage < 0.20 && sampleCurrent < 0.02);
+    const double currentForNearZero = currentValid ? sampleCurrent : inaDisplayCurrent[channel];
+    const bool nearZeroSample = (sampleVoltage < 0.20 && currentForNearZero < 0.02);
     if (heaterActive && nearZeroSample && inaHasSample[channel] && inaDisplayCurrent[channel] > 0.05)
     {
         inaZeroWhileActiveCount[channel]++;
@@ -2170,14 +2237,21 @@ void AstrAlimHeater::applyINAChannelSample(int channel, bool validSample, double
     if (!inaHasSample[channel])
     {
         inaDisplayVoltage[channel] = sampleVoltage;
-        inaDisplayCurrent[channel] = sampleCurrent;
+        inaDisplayCurrent[channel] = currentValid ? sampleCurrent : inaDisplayCurrent[channel];
         inaHasSample[channel] = true;
         return;
     }
 
     const double alpha = heaterActive ? INA_FILTER_ALPHA_ACTIVE : INA_FILTER_ALPHA_IDLE;
     inaDisplayVoltage[channel] = (alpha * sampleVoltage) + ((1.0 - alpha) * inaDisplayVoltage[channel]);
-    inaDisplayCurrent[channel] = (alpha * sampleCurrent) + ((1.0 - alpha) * inaDisplayCurrent[channel]);
+    if (currentValid)
+    {
+        inaDisplayCurrent[channel] = (alpha * sampleCurrent) + ((1.0 - alpha) * inaDisplayCurrent[channel]);
+    }
+    else if (!heaterActive)
+    {
+        inaDisplayCurrent[channel] *= (1.0 - alpha);
+    }
 
     if (!heaterActive && nearZeroSample)
     {
