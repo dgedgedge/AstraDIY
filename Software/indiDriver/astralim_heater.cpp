@@ -2006,7 +2006,8 @@ void AstrAlimHeater::readINA219()
 {
     // Read INA219 sensors for heaters (AstraPwm1 and AstraPwm2)
     // Addresses: 0x49 (Heater 1), 0x4d (Heater 2)
-    // Format: voltage,current for each heater
+    // Format: voltage_mV;current_mA for each heater
+    // Use integer payload to avoid locale-dependent float parsing issues.
     std::string result = execCommand(
         "python3 -c \""
         "import sys\n"
@@ -2019,14 +2020,14 @@ void AstrAlimHeater::readINA219()
         "        try:\n"
         "            ina = INA219(0.01, 6, busnum=1, address=addr)\n"
         "            ina.configure()\n"
-        "            v = max(ina.voltage(), 0)\n"
-        "            c = max(ina.current()/1000, 0)\n"
-        "            results.append(f'{v:.3f},{c:.3f}')\n"
+        "            v_mv = max(int(round(ina.voltage() * 1000.0)), 0)\n"
+        "            i_ma = max(int(round(abs(ina.current()))), 0)\n"
+        "            results.append(f'{v_mv};{i_ma}')\n"
         "        except:\n"
-        "            results.append('0,0')\n"
+        "            results.append('0;0')\n"
         "    print('|'.join(results))\n"
         "except Exception as e:\n"
-        "    print('0,0|0,0')\n"
+        "    print('0;0|0;0')\n"
         "\" 2>/dev/null"
     );
     
@@ -2037,15 +2038,21 @@ void AstrAlimHeater::readINA219()
         return;
     }
     
-    // Parse result: v1,c1|v2,c2
+    // Parse result: v1_mV;i1_mA|v2_mV;i2_mA
     std::istringstream iss(result);
     std::string heaterData;
     
     // Heater 1 (AstraPwm1, address 0x49, GPIO 18, PWM channel 1)
     if (std::getline(iss, heaterData, '|'))
     {
-        double v = 0, c = 0;
-        sscanf(heaterData.c_str(), "%lf,%lf", &v, &c);
+        long vMilli = 0, cMilli = 0;
+        if (sscanf(heaterData.c_str(), "%ld;%ld", &vMilli, &cMilli) != 2)
+        {
+            vMilli = 0;
+            cMilli = 0;
+        }
+        double v = static_cast<double>(vMilli) / 1000.0;
+        double c = static_cast<double>(cMilli) / 1000.0;
         PowerMonitorNP[PWR_VOLTAGE1].setValue(v);
         PowerMonitorNP[PWR_CURRENT1].setValue(c);
     }
@@ -2058,8 +2065,14 @@ void AstrAlimHeater::readINA219()
     // Heater 2 (AstraPwm2, address 0x4d, GPIO 13, PWM channel 2)
     if (std::getline(iss, heaterData, '|'))
     {
-        double v = 0, c = 0;
-        sscanf(heaterData.c_str(), "%lf,%lf", &v, &c);
+        long vMilli = 0, cMilli = 0;
+        if (sscanf(heaterData.c_str(), "%ld;%ld", &vMilli, &cMilli) != 2)
+        {
+            vMilli = 0;
+            cMilli = 0;
+        }
+        double v = static_cast<double>(vMilli) / 1000.0;
+        double c = static_cast<double>(cMilli) / 1000.0;
         PowerMonitorNP[PWR_VOLTAGE2].setValue(v);
         PowerMonitorNP[PWR_CURRENT2].setValue(c);
     }
