@@ -75,6 +75,7 @@ private:
     // Power monitoring
     void readINA219();
     void resetINADisplayState();
+    bool resetINAChannel(int channel);
     void applyINAChannelSample(int channel, bool validSample, bool currentValid, double sampleVoltage, double sampleCurrent, bool heaterActive);
     
     // PID control
@@ -177,6 +178,9 @@ private:
     std::array<int, 2> inaZeroWhileActiveCount = {0, 0};
     std::array<std::string, 2> inaLastErrorTag = {"", ""};
     std::array<int, 2> inaErrorLogCount = {0, 0};
+    std::array<bool, 2> inaNoResponseActive = {false, false};
+    std::array<std::chrono::steady_clock::time_point, 2> inaNoResponseSince {};
+    std::array<std::chrono::steady_clock::time_point, 2> inaLastResetAttempt {};
 
     // Constants
     static constexpr int POLL_INTERVAL_MS = 5000;
@@ -187,6 +191,10 @@ private:
     static constexpr int INA_INVALID_RESET_CYCLES = 12;
     static constexpr int INA_STARTUP_FALLBACK_CYCLES = 3;
     static constexpr int INA_LOG_REPEAT_CYCLES = 6;
+    static constexpr int INA_NO_RESPONSE_RESET_DELAY_MS = 5000;
+    static constexpr int INA_RESET_COOLDOWN_MS = 5000;
+    static constexpr int INA_ADDR_H1 = 0x49;
+    static constexpr int INA_ADDR_H2 = 0x4d;
     static constexpr double DEFAULT_KP = 2.0;
     static constexpr double DEFAULT_KI = 0.1;
     static constexpr double DEFAULT_KD = 0.5;

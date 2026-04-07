@@ -2117,6 +2117,54 @@ void AstrAlimHeater::readINA219()
 
     const bool heater1Active = (Heater1PowerNP[0].getValue() > 1.0);
     const bool heater2Active = (Heater2PowerNP[0].getValue() > 1.0);
+
+    auto now = std::chrono::steady_clock::now();
+    auto handleNoResponseReset = [this, now](int ch, bool validSample, bool heaterActive)
+    {
+        if (validSample)
+        {
+            inaNoResponseActive[ch] = false;
+            return;
+        }
+
+        // Only attempt bus-level recovery when channel is actually in use
+        // or already had valid telemetry before.
+        if (!heaterActive && !inaHasSample[ch])
+            return;
+
+        if (!inaNoResponseActive[ch])
+        {
+            inaNoResponseActive[ch] = true;
+            inaNoResponseSince[ch] = now;
+            return;
+        }
+
+        auto silenceMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - inaNoResponseSince[ch]).count();
+        if (silenceMs < INA_NO_RESPONSE_RESET_DELAY_MS)
+            return;
+
+        auto sinceLastResetMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - inaLastResetAttempt[ch]).count();
+        if (sinceLastResetMs < INA_RESET_COOLDOWN_MS)
+            return;
+
+        inaLastResetAttempt[ch] = now;
+        bool resetOk = resetINAChannel(ch);
+        inaNoResponseSince[ch] = now;
+        if (resetOk)
+        {
+            LOGF_WARN("Heater %d INA no response for >= %dms: reset sent on address 0x%02x",
+                      ch + 1, INA_NO_RESPONSE_RESET_DELAY_MS, (ch == 0) ? INA_ADDR_H1 : INA_ADDR_H2);
+        }
+        else
+        {
+            LOGF_WARN("Heater %d INA no response: reset failed on address 0x%02x",
+                      ch + 1, (ch == 0) ? INA_ADDR_H1 : INA_ADDR_H2);
+        }
+    };
+
+    handleNoResponseReset(0, valid1, heater1Active);
+    handleNoResponseReset(1, valid2, heater2Active);
+
     auto logINAStatus = [this](int ch, bool sampleValid, bool sampleCurrentValid, const std::string& tag, bool heaterActive)
     {
         if (sampleValid && sampleCurrentValid)
@@ -2165,8 +2213,23 @@ void AstrAlimHeater::readINA219()
     PowerMonitorNP.apply();
 }
 
+bool AstrAlimHeater::resetINAChannel(int channel)
+{
+    if (channel < 0 || channel > 1)
+        return false;
+
+    const int addr = (channel == 0) ? INA_ADDR_H1 : INA_ADDR_H2;
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd),
+             "python3 -c \"import smbus,time; bus=smbus.SMBus(1); bus.write_i2c_block_data(0x%02x, 0x00, [0x80, 0x00]); time.sleep(0.02); print('ok')\" 2>/dev/null",
+             addr);
+    std::string result = execCommand(cmd);
+    return result == "ok";
+}
+
 void AstrAlimHeater::resetINADisplayState()
 {
+    auto now = std::chrono::steady_clock::now();
     for (int ch = 0; ch < 2; ch++)
     {
         inaDisplayVoltage[ch] = 0.0;
@@ -2176,6 +2239,9 @@ void AstrAlimHeater::resetINADisplayState()
         inaZeroWhileActiveCount[ch] = 0;
         inaLastErrorTag[ch].clear();
         inaErrorLogCount[ch] = 0;
+        inaNoResponseActive[ch] = false;
+        inaNoResponseSince[ch] = now;
+        inaLastResetAttempt[ch] = now - std::chrono::milliseconds(INA_RESET_COOLDOWN_MS);
     }
 }
 
