@@ -40,9 +40,9 @@ class AstraIna(AstraComDevice):
             "AstraDc3": {"ispwm":False, "busnum":1, "address": 0x46, "shunt_ohms": 0.01, "max_expected_amps": 6, "pin": 40,
                          "force_abs_current_power": True,
                          "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT },
-            "AstraPwm1": {"ispwm":True, "busnum":1, "address": 0x4d, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":None, "pwm":1, 
+            "AstraPwm1": {"ispwm":True, "busnum":1, "address": 0x49, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":None, "pwm":1, 
                          "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT },
-            "AstraPwm2": {"ispwm":True, "busnum":1, "address": 0x49, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":None, "pwm":2, 
+            "AstraPwm2": {"ispwm":True, "busnum":1, "address": 0x4d, "shunt_ohms": 0.01, "max_expected_amps": 6, "chip":None, "pwm":2, 
                          "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT },
             "AstOnStep": {"ispwm":False, "busnum":1, "address": 0x40, "shunt_ohms": 0.005, "max_expected_amps": 6, "chip":None, "pwm":2, 
                          "bus_adc":INA219.ADC_12BIT, "shunt_adc":INA219.ADC_12BIT }
@@ -521,5 +521,4 @@ if __name__ == "__main__":
                 currentA = current / 1000.0
 
                 print(f"{name}: Shunt {shunt_voltage:+.3f}mV, Bus {bus_voltage:+.3f}V Current: {currentA:+.3f}A, Power: {power:.3f}mW")
-
 

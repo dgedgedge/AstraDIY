@@ -4,6 +4,7 @@
  ******************************************************************************/
 
 #include "astralim_heater.h"
+#include "astralim_gpio.h"
 #include "config.h"
 
 #include <cstring>
@@ -18,7 +19,7 @@
 #include <vector>
 #include <algorithm>
 #include <chrono>
-#include <glob.h>
+#include <set>
 
 // Singleton instance
 static std::unique_ptr<AstrAlimHeater> heaterInstance(new AstrAlimHeater());
@@ -28,6 +29,7 @@ AstrAlimHeater::AstrAlimHeater()
     setVersion(INDI_ASTRALIM_VERSION_MAJOR, INDI_ASTRALIM_VERSION_MINOR);
     pidRunning[0] = false;
     pidRunning[1] = false;
+    pwmGpio = std::make_unique<AstrAlim::GpioController>();
     
     // Initialiser les états d'assignation
     for (int i = 0; i < 2; i++)
@@ -58,6 +60,7 @@ AstrAlimHeater::~AstrAlimHeater()
         if (pidThread[i].joinable())
             pidThread[i].join();
     }
+    closePWM();
 }
 
 const char* AstrAlimHeater::getDefaultName()
@@ -434,196 +437,181 @@ void AstrAlimHeater::TimerHit()
 
 // ==================== PWM Control ====================
 
-int AstrAlimHeater::getPWMChip()
+std::array<bool, 10> AstrAlimHeater::buildStepPattern(double percent) const
 {
-    // Dynamic detection: find first pwmchip with at least 2 channels
-    // This works with kernel 6.6 (pwmchip2) and kernel 6.12+ (pwmchip0/1/2 variable)
-    glob_t glob_result;
-    memset(&glob_result, 0, sizeof(glob_result));
-    
-    int ret = glob("/sys/class/pwm/pwmchip*", GLOB_TILDE, nullptr, &glob_result);
-    if (ret == 0)
-    {
-        // Sort paths to check in order
-        std::vector<std::string> chipPaths;
-        for (size_t i = 0; i < glob_result.gl_pathc; i++)
-        {
-            chipPaths.push_back(glob_result.gl_pathv[i]);
-        }
-        std::sort(chipPaths.begin(), chipPaths.end());
-        
-        // Check each pwmchip for sufficient channels
-        for (const auto& chipPath : chipPaths)
-        {
-            try
-            {
-                // Extract chip number from path (e.g., "/sys/class/pwm/pwmchip2" -> 2)
-                std::string chipNumStr = chipPath.substr(strlen("/sys/class/pwm/pwmchip"));
-                int chipNum = std::stoi(chipNumStr);
-                
-                // Check npwm file
-                std::string npwmPath = chipPath + "/npwm";
-                std::ifstream npwmFile(npwmPath);
-                if (npwmFile.is_open())
-                {
-                    int npwm = 0;
-                    npwmFile >> npwm;
-                    npwmFile.close();
-                    
-                    // Check if chip directory exists and has enough channels
-                    if (npwm >= 2 && access(chipPath.c_str(), F_OK) == 0)
-                    {
-                        globfree(&glob_result);
-                        LOGF_INFO("Auto-detected pwmchip%d with %d channels", chipNum, npwm);
-                        return chipNum;
-                    }
-                }
-            }
-            catch (...)
-            {
-                // Skip invalid chip paths
-                continue;
-            }
-        }
-        globfree(&glob_result);
-    }
-    
-    // Fallback: try Pi 4 default (pwmchip0)
-    if (access("/sys/class/pwm/pwmchip0", F_OK) == 0)
-    {
-        LOG_INFO("Using fallback pwmchip0");
-        return 0;
-    }
-    
-    // No PWM chip found
-    LOG_ERROR("No PWM chip found with sufficient channels (>=2). Check dtoverlay configuration.");
-    return -1;
-}
+    std::array<bool, 10> pattern {};
+    percent = std::max(0.0, std::min(100.0, percent));
 
-int AstrAlimHeater::getPWMChannel(int heaterChannel)
-{
-    // Mapping des canaux PWM :
-    // Pi 5: Heater 1 (channel 0) → PWM channel 1 (GPIO 18, INA 0x49, AstraPwm1)
-    //       Heater 2 (channel 1) → PWM channel 2 (GPIO 13, INA 0x4d, AstraPwm2)
-    // Pi 4: Heater 1 (channel 0) → PWM channel 0
-    //       Heater 2 (channel 1) → PWM channel 1
-    std::string model = execCommand("cat /sys/firmware/devicetree/base/model 2>/dev/null");
-    if (model.find("Pi 5") != std::string::npos)
-        return heaterChannel + 1;
-    else
-        return heaterChannel;
+    const int stepCount = STEP_PWM_STEP_COUNT;
+    int highStepCount = static_cast<int>(std::lround(stepCount * percent / 100.0));
+    highStepCount = std::max(0, std::min(highStepCount, stepCount));
+
+    if (highStepCount == 0)
+        return pattern;
+
+    if (highStepCount >= stepCount)
+    {
+        pattern.fill(true);
+        return pattern;
+    }
+
+    std::set<int> distributedSteps;
+    for (int i = 0; i < highStepCount; i++)
+    {
+        int step = static_cast<int>(std::lround((static_cast<double>(i) * stepCount) / highStepCount)) % stepCount;
+        distributedSteps.insert(step);
+    }
+
+    for (int candidate = 0; candidate < stepCount && static_cast<int>(distributedSteps.size()) < highStepCount; candidate++)
+    {
+        distributedSteps.insert(candidate);
+    }
+
+    for (int step : distributedSteps)
+    {
+        pattern[step] = true;
+    }
+
+    return pattern;
 }
 
 bool AstrAlimHeater::initPWM()
 {
-    pwmChip = getPWMChip();
-    
-    if (pwmChip < 0)
+    if (!pwmGpio->openChip(AstrAlim::RPI5_GPIO_CHIP))
     {
-        LOG_ERROR("Failed to detect PWM chip. Check dtoverlay configuration in /boot/firmware/config.txt and reboot.");
+        LOGF_ERROR("Failed to open GPIO chip %s for step PWM", AstrAlim::RPI5_GPIO_CHIP);
         return false;
     }
-    
-    // Verify pwmchip exists
-    std::string chipPath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip);
-    if (access(chipPath.c_str(), F_OK) != 0)
-    {
-        LOGF_ERROR("PWM chip %d not available. Check dtoverlay configuration.", pwmChip);
-        return false;
-    }
-    
+
+    const int gpioPins[2] = { STEP_PWM_GPIO_H1, STEP_PWM_GPIO_H2 };
     for (int ch = 0; ch < 2; ch++)
     {
-        int pwmChannel = getPWMChannel(ch);
-        std::string basePath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip) + "/pwm" + std::to_string(pwmChannel);
-        
-        // Export PWM channel if not already exported
-        if (access(basePath.c_str(), F_OK) != 0)
+        if (pwmGpio->isLineUsed(gpioPins[ch]))
         {
-            std::string exportPath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip) + "/export";
-            std::ofstream exportFile(exportPath);
-            if (exportFile.is_open())
+            std::string consumer = pwmGpio->getLineConsumer(gpioPins[ch]);
+            if (!consumer.empty())
             {
-                exportFile << pwmChannel;
-                exportFile.close();
-                usleep(100000); // Wait for sysfs to create files
+                LOGF_ERROR("GPIO %d is already used by '%s'. Stop HMI/other process and retry.", gpioPins[ch], consumer.c_str());
             }
             else
             {
-                LOGF_ERROR("Cannot export PWM channel %d", pwmChannel);
-                return false;
+                LOGF_ERROR("GPIO %d is already used by another process. Stop HMI/other process and retry.", gpioPins[ch]);
             }
+            pwmGpio->closeChip();
+            return false;
         }
-        
-        // Set period (1ms = 1000000ns)
-        std::string periodPath = basePath + "/period";
-        std::ofstream periodFile(periodPath);
-        if (periodFile.is_open())
-        {
-            periodFile << 1000000;
-            periodFile.close();
-        }
-        
-        // Enable PWM
-        std::string enablePath = basePath + "/enable";
-        std::ofstream enableFile(enablePath);
-        if (enableFile.is_open())
-        {
-            enableFile << 1;
-            enableFile.close();
-            pwmEnabled[ch] = true;
-        }
-        
-        // Set initial duty to 0
-        setPWMDuty(ch, 0);
     }
-    
+
+    for (int ch = 0; ch < 2; ch++)
+    {
+        char consumer[64];
+        snprintf(consumer, sizeof(consumer), "heater%d@astralim_heater", ch + 1);
+        if (!pwmGpio->requestOutput(gpioPins[ch], consumer, 0))
+        {
+            LOGF_ERROR("Failed to request GPIO %d for step PWM", gpioPins[ch]);
+            pwmGpio->closeChip();
+            return false;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(pwmStepMutex);
+        pwmDutyPercent[0] = 0.0;
+        pwmDutyPercent[1] = 0.0;
+        pwmStepPattern[0] = buildStepPattern(0.0);
+        pwmStepPattern[1] = buildStepPattern(0.0);
+        pwmStepIndex = 0;
+    }
+
+    try
+    {
+        pwmStepRunning = true;
+        pwmStepThread = std::thread(&AstrAlimHeater::runStepPwmLoop, this);
+    }
+    catch (const std::exception& e)
+    {
+        pwmStepRunning = false;
+        LOGF_ERROR("Failed to start step PWM thread: %s", e.what());
+        pwmGpio->closeChip();
+        return false;
+    }
+    LOGF_INFO("Step PWM started: tick=%dms steps=%d (Heater1 GPIO%d, Heater2 GPIO%d)",
+              STEP_PWM_TICK_MS, STEP_PWM_STEP_COUNT, STEP_PWM_GPIO_H1, STEP_PWM_GPIO_H2);
+
     return true;
 }
 
 void AstrAlimHeater::closePWM()
 {
-    for (int ch = 0; ch < 2; ch++)
+    pwmStepRunning = false;
+    pwmStepCv.notify_all();
+
+    if (pwmStepThread.joinable())
     {
-        if (pwmEnabled[ch])
-        {
-            setPWMDuty(ch, 0);
-            
-            int pwmChannel = getPWMChannel(ch);
-            std::string enablePath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip) + "/pwm" + std::to_string(pwmChannel) + "/enable";
-            std::ofstream enableFile(enablePath);
-            if (enableFile.is_open())
-            {
-                enableFile << 0;
-                enableFile.close();
-            }
-            pwmEnabled[ch] = false;
-        }
+        pwmStepThread.join();
     }
+
+    if (pwmGpio && pwmGpio->isOpen())
+    {
+        pwmGpio->setValue(STEP_PWM_GPIO_H1, 0);
+        pwmGpio->setValue(STEP_PWM_GPIO_H2, 0);
+        pwmGpio->closeChip();
+    }
+
+    std::lock_guard<std::mutex> lock(pwmStepMutex);
+    pwmDutyPercent[0] = 0.0;
+    pwmDutyPercent[1] = 0.0;
+    pwmStepPattern[0] = buildStepPattern(0.0);
+    pwmStepPattern[1] = buildStepPattern(0.0);
+    pwmStepIndex = 0;
 }
 
 bool AstrAlimHeater::setPWMDuty(int channel, double percent)
 {
     if (channel < 0 || channel > 1)
         return false;
-    
+
     percent = std::max(0.0, std::min(100.0, percent));
-    
-    int pwmChannel = getPWMChannel(channel);
-    std::string dutyPath = "/sys/class/pwm/pwmchip" + std::to_string(pwmChip) + "/pwm" + std::to_string(pwmChannel) + "/duty_cycle";
-    
-    // Convert percent to nanoseconds (period is 1000000ns)
-    int dutyNs = static_cast<int>(percent * 10000);
-    
-    std::ofstream dutyFile(dutyPath);
-    if (dutyFile.is_open())
+
     {
-        dutyFile << dutyNs;
-        dutyFile.close();
-        return true;
+        std::lock_guard<std::mutex> lock(pwmStepMutex);
+        pwmDutyPercent[channel] = percent;
+        pwmStepPattern[channel] = buildStepPattern(percent);
     }
-    
-    return false;
+    pwmStepCv.notify_one();
+
+    return true;
+}
+
+void AstrAlimHeater::runStepPwmLoop()
+{
+    while (pwmStepRunning)
+    {
+        int valueH1 = 0;
+        int valueH2 = 0;
+        {
+            std::lock_guard<std::mutex> lock(pwmStepMutex);
+            valueH1 = pwmStepPattern[0][pwmStepIndex] ? 1 : 0;
+            valueH2 = pwmStepPattern[1][pwmStepIndex] ? 1 : 0;
+            pwmStepIndex = (pwmStepIndex + 1) % STEP_PWM_STEP_COUNT;
+        }
+
+        if (pwmGpio && pwmGpio->isOpen())
+        {
+            pwmGpio->setValue(STEP_PWM_GPIO_H1, valueH1);
+            pwmGpio->setValue(STEP_PWM_GPIO_H2, valueH2);
+        }
+
+        std::unique_lock<std::mutex> lock(pwmStepMutex);
+        pwmStepCv.wait_for(lock, std::chrono::milliseconds(STEP_PWM_TICK_MS),
+                           [this]() { return !pwmStepRunning.load(); });
+    }
+
+    if (pwmGpio && pwmGpio->isOpen())
+    {
+        pwmGpio->setValue(STEP_PWM_GPIO_H1, 0);
+        pwmGpio->setValue(STEP_PWM_GPIO_H2, 0);
+    }
 }
 
 // ==================== Temperature Sensors ====================

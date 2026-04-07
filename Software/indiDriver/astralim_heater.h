@@ -20,6 +20,13 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <array>
+#include <condition_variable>
+#include <mutex>
+
+namespace AstrAlim {
+class GpioController;
+}
 
 class AstrAlimHeater : public INDI::DefaultDevice
 {
@@ -47,6 +54,8 @@ private:
     bool initPWM();
     void closePWM();
     bool setPWMDuty(int channel, double percent);
+    void runStepPwmLoop();
+    std::array<bool, 10> buildStepPattern(double percent) const;
     
     // Temperature sensors
     bool readDS18B20Sensors();
@@ -72,12 +81,20 @@ private:
     
     // Helper
     std::string execCommand(const char* cmd);
-    int getPWMChip();
-    int getPWMChannel(int heaterChannel);
-
-    // PWM file descriptors
-    int pwmChip = -1;
-    bool pwmEnabled[2] = {false, false};
+    
+    // Step PWM runtime state (aligned with Python HMI behavior)
+    static constexpr int STEP_PWM_TICK_MS = 250;
+    static constexpr int STEP_PWM_STEP_COUNT = 10;
+    static constexpr int STEP_PWM_GPIO_H1 = 18; // AstraPwm1
+    static constexpr int STEP_PWM_GPIO_H2 = 13; // AstraPwm2
+    std::unique_ptr<AstrAlim::GpioController> pwmGpio;
+    std::array<double, 2> pwmDutyPercent = {0.0, 0.0};
+    std::array<std::array<bool, STEP_PWM_STEP_COUNT>, 2> pwmStepPattern = {};
+    std::thread pwmStepThread;
+    std::atomic<bool> pwmStepRunning {false};
+    std::mutex pwmStepMutex;
+    std::condition_variable pwmStepCv;
+    int pwmStepIndex = 0;
     
     // PID state
     double pidIntegral[2] = {0, 0};
