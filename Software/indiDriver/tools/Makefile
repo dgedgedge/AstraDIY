@@ -1,21 +1,42 @@
 CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -I..
-LDFLAGS :=
 
-TARGET := test_bme280
-SRC := test_bme280.cpp ../astralim_bme280.cpp
+BUILD_DIR := build
+BIN_DIR := $(BUILD_DIR)/bin
 
-.PHONY: all run clean
+BME_TARGET := $(BIN_DIR)/test_bme280
+COM_TARGET := $(BIN_DIR)/test_astra_com
 
-all: $(TARGET)
+BME_SRC := test_bme280.cpp ../astralim_bme280.cpp
+COM_SRC := test_astra_com.cpp ../astralim_com_actor.cpp ../astralim_com_device.cpp ../astralim_com_fetcher.cpp
 
-$(TARGET): $(SRC)
-	$(CXX) $(CXXFLAGS) $(SRC) -o $@ $(LDFLAGS)
+.PHONY: all bme com run run-bme run-com clean
 
-# Usage:
-# make run ARGS="0x76 1 5"
-run: $(TARGET)
-	./$(TARGET) $(ARGS)
+all: bme com
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+bme: $(BME_TARGET)
+
+com: $(COM_TARGET)
+
+$(BME_TARGET): $(BME_SRC) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(BME_SRC) -o $@
+
+$(COM_TARGET): $(COM_SRC) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(COM_SRC) -o $@ -pthread
+
+# Compatibilite historique: `make run` lance le test BME.
+# Usage BME: make run-bme ARGS="0x76 1 5"
+# Usage COM: make run-com ARGS="1200"
+run: run-bme
+
+run-bme: bme
+	./$(BME_TARGET) $(ARGS)
+
+run-com: com
+	./$(COM_TARGET) $(ARGS)
 
 clean:
-	rm -f $(TARGET)
+	rm -rf $(BUILD_DIR)
