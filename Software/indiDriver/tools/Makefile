@@ -2,7 +2,7 @@ CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -I..
 
 BUILD_DIR := build
-BIN_DIR := $(BUILD_DIR)/bin
+BIN_DIR := $(BUILD_DIR)
 
 BME_TARGET := $(BIN_DIR)/test_bme280
 COM_TARGET := $(BIN_DIR)/test_astra_com
