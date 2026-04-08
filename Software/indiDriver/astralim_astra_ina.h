@@ -48,13 +48,15 @@ public:
              double maxExpectedAmps = -1.0,
              int busNum = -1,
              int address = -1,
-             const std::string& name = "");
+             const std::string& name = "",
+             bool autoRegisterToFetcher = true);
 
     void startMeasurement(int step, double integrationDurationS) override;
     void getMeasurement(int step, double integrationDurationS) override;
     void onCycleConfigurationChanged(double periodS, int stepCount) override;
 
     bool getPingOK() const;
+    bool readSample(double integrationDurationS, double& outVoltageV, double& outCurrentA, double& outPowerW);
 
     void configure(Ina219::VoltageRange voltageRange = Ina219::RANGE_16V,
                    int gain = Ina219::GAIN_AUTO,

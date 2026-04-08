@@ -7,10 +7,11 @@
 namespace AstrAlim
 {
 
-AstraComDevice::AstraComDevice(bool eachStep, std::string nameValue)
+AstraComDevice::AstraComDevice(bool eachStep, std::string nameValue, bool autoRegisterToFetcher)
     : name(nameValue.empty() ? "AstraComDevice" : std::move(nameValue))
 {
-    registerToFetcher(nullptr, eachStep);
+    if (autoRegisterToFetcher)
+        registerToFetcher(nullptr, eachStep);
 }
 
 void AstraComDevice::registerToFetcher(AstraComFetcher* fetcher, bool eachStep)

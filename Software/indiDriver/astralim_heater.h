@@ -26,7 +26,8 @@
 
 namespace AstrAlim {
 class GpioController;
-class Ina219;
+class AstraIna;
+class Bme280;
 }
 
 class AstrAlimHeater : public INDI::DefaultDevice
@@ -83,9 +84,6 @@ private:
     void runPIDControl(int channel);
     double computePID(int channel, double setpoint, double current);
     
-    // Helper
-    std::string execCommand(const char* cmd);
-    
     // Step PWM runtime state (aligned with Python HMI behavior)
     static constexpr int STEP_PWM_TICK_MS = 250;
     static constexpr int STEP_PWM_STEP_COUNT = 10;
@@ -109,6 +107,7 @@ private:
     // DS18B20 sensor paths
     std::string ds18b20Path[2];
     std::vector<std::string> availableDS18B20;
+    std::unique_ptr<AstrAlim::Bme280> ambientBmeSensor;
     
     // Dew point filtering (moving average with minimum change threshold)
     static constexpr int DEW_POINT_FILTER_SIZE = 10;  // Nombre de valeurs pour la moyenne mobile (augmenté pour plus de stabilité)
@@ -182,7 +181,7 @@ private:
     std::array<bool, 2> inaNoResponseActive = {false, false};
     std::array<std::chrono::steady_clock::time_point, 2> inaNoResponseSince {};
     std::array<std::chrono::steady_clock::time_point, 2> inaLastResetAttempt {};
-    std::array<std::unique_ptr<AstrAlim::Ina219>, 2> inaSensors;
+    std::array<std::unique_ptr<AstrAlim::AstraIna>, 2> inaSensors;
 
     // Constants
     static constexpr int POLL_INTERVAL_MS = 5000;

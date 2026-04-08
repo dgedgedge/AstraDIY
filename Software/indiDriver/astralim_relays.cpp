@@ -5,11 +5,11 @@
  ******************************************************************************/
 
 #include "astralim_relays.h"
+#include "astralim_astra_ina.h"
 #include "config.h"
 #include <cstring>
 #include <array>
 #include <memory>
-#include <sstream>
 
 // Singleton instance
 static std::unique_ptr<AstrAlimRelays> relaysInstance(new AstrAlimRelays());
@@ -158,13 +158,13 @@ bool AstrAlimRelays::Connect()
             if (!consumer.empty())
             {
                 LOGF_ERROR("GPIO pin %d (DC%d) is already in use by '%s'. "
-                          "Please stop the Python script or other process using this GPIO before connecting.",
+                          "Please stop the process using this GPIO before connecting.",
                           pins[i], i + 1, consumer.c_str());
             }
             else
             {
                 LOGF_ERROR("GPIO pin %d (DC%d) is already in use by another process. "
-                          "Please stop any Python scripts (AstraGpio.py) or other processes using this GPIO before connecting.",
+                          "Please stop any process using this GPIO before connecting.",
                           pins[i], i + 1);
             }
             gpio->closeChip();
@@ -282,92 +282,58 @@ void AstrAlimRelays::updateSwitchStates()
 
 void AstrAlimRelays::readINA219()
 {
-    // Read INA219 sensors via Python helper
-    // Format: voltage,current,power for each sensor
-    std::string result = execCommand(
-        "python3 -c \""
-        "import sys\n"
-        "import fcntl\n"
-        "lockf = open('/tmp/astradiy_i2c.lock', 'w')\n"
-        "fcntl.flock(lockf, fcntl.LOCK_EX)\n"
-        "sys.path.insert(0, '/home/stellarmate')\n"
-        "try:\n"
-        "    from lib.ina219 import INA219\n"
-        "    results = []\n"
-        "    for addr in [0x41, 0x44, 0x46]:\n"
-        "        try:\n"
-        "            ina = INA219(0.01, 6, busnum=1, address=addr)\n"
-        "            ina.configure()\n"
-        "            v = max(ina.voltage(), 0)\n"
-        "            c = max(ina.current()/1000, 0)\n"
-        "            p = max(ina.power()/1000, 0)\n"
-        "            results.append(f'{v:.3f},{c:.3f},{p:.3f}')\n"
-        "        except:\n"
-        "            results.append('0,0,0')\n"
-        "    print('|'.join(results))\n"
-        "except Exception as e:\n"
-        "    print('0,0,0|0,0,0|0,0,0')\n"
-        "\" 2>/dev/null"
-    );
-    
-    if (result.empty())
-    {
-        PowerDC1NP.setState(IPS_ALERT);
-        PowerDC2NP.setState(IPS_ALERT);
-        PowerDC3NP.setState(IPS_ALERT);
-        PowerDC1NP.apply();
-        PowerDC2NP.apply();
-        PowerDC3NP.apply();
-        return;
-    }
-    
-    // Parse result: v1,c1,p1|v2,c2,p2|v3,c3,p3
+    const int addresses[3] = {INA_DC1_ADDR, INA_DC2_ADDR, INA_DC3_ADDR};
+
     double totalCurrent = 0;
     double totalPower = 0;
-    
-    std::istringstream iss(result);
-    std::string sensorData;
-    
-    // DC1
-    if (std::getline(iss, sensorData, '|'))
+
+    for (int i = 0; i < 3; i++)
     {
-        double v = 0, c = 0, p = 0;
-        sscanf(sensorData.c_str(), "%lf,%lf,%lf", &v, &c, &p);
-        PowerDC1NP[PWR_VOLTAGE].setValue(v);
-        PowerDC1NP[PWR_CURRENT].setValue(c);
-        PowerDC1NP[PWR_POWER].setValue(p);
-        PowerDC1NP.setState((v > 0 || c > 0) ? IPS_OK : IPS_IDLE);
-        PowerDC1NP.apply();
-        totalCurrent += c;
-        totalPower += p;
-    }
-    
-    // DC2
-    if (std::getline(iss, sensorData, '|'))
-    {
-        double v = 0, c = 0, p = 0;
-        sscanf(sensorData.c_str(), "%lf,%lf,%lf", &v, &c, &p);
-        PowerDC2NP[PWR_VOLTAGE].setValue(v);
-        PowerDC2NP[PWR_CURRENT].setValue(c);
-        PowerDC2NP[PWR_POWER].setValue(p);
-        PowerDC2NP.setState((v > 0 || c > 0) ? IPS_OK : IPS_IDLE);
-        PowerDC2NP.apply();
-        totalCurrent += c;
-        totalPower += p;
-    }
-    
-    // DC3
-    if (std::getline(iss, sensorData, '|'))
-    {
-        double v = 0, c = 0, p = 0;
-        sscanf(sensorData.c_str(), "%lf,%lf,%lf", &v, &c, &p);
-        PowerDC3NP[PWR_VOLTAGE].setValue(v);
-        PowerDC3NP[PWR_CURRENT].setValue(c);
-        PowerDC3NP[PWR_POWER].setValue(p);
-        PowerDC3NP.setState((v > 0 || c > 0) ? IPS_OK : IPS_IDLE);
-        PowerDC3NP.apply();
-        totalCurrent += c;
-        totalPower += p;
+        double voltageV = 0.0;
+        double currentA = 0.0;
+        double powerW = 0.0;
+        bool valid = false;
+
+        try
+        {
+            if (!inaSensors[i])
+                inaSensors[i] = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, addresses[i], "", false);
+
+            valid = inaSensors[i]->readSample(POLLING_MS / 1000.0, voltageV, currentA, powerW);
+        }
+        catch (const std::exception&)
+        {
+            valid = false;
+            inaSensors[i].reset();
+        }
+
+        if (i == 0)
+        {
+            PowerDC1NP[PWR_VOLTAGE].setValue(voltageV);
+            PowerDC1NP[PWR_CURRENT].setValue(currentA);
+            PowerDC1NP[PWR_POWER].setValue(powerW);
+            PowerDC1NP.setState(valid ? IPS_OK : IPS_IDLE);
+            PowerDC1NP.apply();
+        }
+        else if (i == 1)
+        {
+            PowerDC2NP[PWR_VOLTAGE].setValue(voltageV);
+            PowerDC2NP[PWR_CURRENT].setValue(currentA);
+            PowerDC2NP[PWR_POWER].setValue(powerW);
+            PowerDC2NP.setState(valid ? IPS_OK : IPS_IDLE);
+            PowerDC2NP.apply();
+        }
+        else
+        {
+            PowerDC3NP[PWR_VOLTAGE].setValue(voltageV);
+            PowerDC3NP[PWR_CURRENT].setValue(currentA);
+            PowerDC3NP[PWR_POWER].setValue(powerW);
+            PowerDC3NP.setState(valid ? IPS_OK : IPS_IDLE);
+            PowerDC3NP.apply();
+        }
+
+        totalCurrent += currentA;
+        totalPower += powerW;
     }
     
     // Update total and accumulate energy
@@ -380,25 +346,6 @@ void AstrAlimRelays::readINA219()
     
     TotalPowerNP.setState(IPS_OK);
     TotalPowerNP.apply();
-}
-
-std::string AstrAlimRelays::execCommand(const char* cmd)
-{
-    std::array<char, 256> buffer;
-    std::string result;
-    
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
-    if (!pipe)
-        return "";
-    
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
-        result += buffer.data();
-    
-    // Remove trailing newline
-    if (!result.empty() && result.back() == '\n')
-        result.pop_back();
-    
-    return result;
 }
 
 bool AstrAlimRelays::setRelay(int relay, bool on)

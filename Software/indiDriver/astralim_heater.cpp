@@ -5,7 +5,8 @@
 
 #include "astralim_heater.h"
 #include "astralim_gpio.h"
-#include "astralim_ina219.h"
+#include "astralim_astra_ina.h"
+#include "astralim_bme280.h"
 #include "config.h"
 
 #include <cstring>
@@ -707,109 +708,56 @@ bool AstrAlimHeater::readDS18B20Sensors()
 
 bool AstrAlimHeater::readBME280()
 {
-    // Try to read BME280/BMP280 via i2cget or python helper
-    // The sensor is typically at address 0x76 or 0x77 on bus 1
-    
-    // Use a simple approach: read from a helper script or direct i2c
-    // For now, we'll use a Python one-liner approach
-    
-    std::string result = execCommand(
-        "python3 -c \""
-        "import fcntl\n"
-        "lockf = open('/tmp/astradiy_i2c.lock', 'w')\n"
-        "fcntl.flock(lockf, fcntl.LOCK_EX)\n"
-        "try:\n"
-        "    from lib.bme280_lib import readBME280All\n"
-        "    t,p,h = readBME280All()\n"
-        "    print(f'{t},{p},{h}')\n"
-        "except:\n"
-        "    try:\n"
-        "        import smbus2\n"
-        "        import bme280\n"
-        "        bus = smbus2.SMBus(1)\n"
-        "        cal = bme280.load_calibration_params(bus, 0x76)\n"
-        "        data = bme280.sample(bus, 0x76, cal)\n"
-        "        print(f'{data.temperature},{data.pressure},{data.humidity}')\n"
-        "    except:\n"
-        "        print('error')\n"
-        "\" 2>/dev/null"
-    );
-    
-    if (result.empty() || result.find("error") != std::string::npos)
+    try
     {
-        // Try alternate approach with direct file read if available
-        AmbientNP.setState(IPS_ALERT);
-        AmbientNP.apply();
-        return false;
-    }
-    
-    // Parse result: temp,pressure,humidity
-    std::istringstream iss(result);
-    std::string token;
-    std::vector<double> values;
-    
-    while (std::getline(iss, token, ','))
-    {
-        try
+        if (!ambientBmeSensor)
         {
-            values.push_back(std::stod(token));
+            ambientBmeSensor = std::make_unique<AstrAlim::Bme280>();
+            ambientBmeSensor->loadCalibrationData();
+            ambientBmeSensor->configureNormalMode();
         }
-        catch (...)
-        {
-            values.push_back(0);
-        }
-    }
-    
-    if (values.size() >= 3)
-    {
-        double temp = values[0];
-        double pressure = values[1];
-        double humidity = values[2];
-        
-        // If humidity is 0 (BMP280), use manual humidity
+
+        double temp = 0.0;
+        double pressure = 0.0;
+        double humidity = 0.0;
+        std::tie(temp, pressure, humidity) = ambientBmeSensor->acquireDataNormalMode();
+
         if (humidity == 0)
-        {
             humidity = ManualHumidityNP[0].getValue();
-        }
-        
-        // Filtrer la température et l'humidité avant de calculer le point de rosée
+
         filteredTemp = filterValue(temp, tempHistory, TEMP_HUMIDITY_MIN_CHANGE);
         filteredHumidity = filterValue(humidity, humidityHistory, TEMP_HUMIDITY_MIN_CHANGE);
-        
+
         AmbientNP[AMB_TEMPERATURE].setValue(temp);
         AmbientNP[AMB_PRESSURE].setValue(pressure);
         AmbientNP[AMB_HUMIDITY].setValue(humidity);
-        
-        // Calculate dew point using filtered values for stability
+
         if (humidity > 0)
         {
-            // Utiliser les valeurs filtrées pour calculer le point de rosée
             double dewPoint = calculateDewPoint(filteredTemp, filteredHumidity);
-            
-            // Filtrer également le point de rosée calculé avec une moyenne mobile
             filteredDewPoint = filterDewPoint(dewPoint);
-            
             AmbientNP[AMB_DEWPOINT].setValue(filteredDewPoint);
         }
         else
         {
-            // Réinitialiser les filtres si pas d'humidité
             dewPointHistory.clear();
             tempHistory.clear();
             humidityHistory.clear();
             filteredDewPoint = DEWPOINT_UNAVAILABLE;
             AmbientNP[AMB_DEWPOINT].setValue(DEWPOINT_UNAVAILABLE);
         }
-        
+
         AmbientNP.setState(IPS_OK);
+        AmbientNP.apply();
+        return true;
     }
-    else
+    catch (const std::exception&)
     {
+        ambientBmeSensor.reset();
         AmbientNP.setState(IPS_ALERT);
+        AmbientNP.apply();
+        return false;
     }
-    
-    AmbientNP.apply();
-    return true;
 }
 
 double AstrAlimHeater::calculateDewPoint(double temp, double humidity)
@@ -1547,25 +1495,6 @@ bool AstrAlimHeater::saveConfigItems(FILE* fp)
     return true;
 }
 
-std::string AstrAlimHeater::execCommand(const char* cmd)
-{
-    std::array<char, 256> buffer;
-    std::string result;
-    
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
-    if (!pipe)
-        return "";
-    
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
-        result += buffer.data();
-    
-    // Remove trailing newline
-    if (!result.empty() && result.back() == '\n')
-        result.pop_back();
-    
-    return result;
-}
-
 // ==================== Sensor Assignment Functions ====================
 
 double AstrAlimHeater::readDS18B20Temperature(const std::string& sensorId)
@@ -2027,18 +1956,23 @@ void AstrAlimHeater::readINA219()
         {
             if (!inaSensors[channel])
             {
-                inaSensors[channel] = std::make_unique<AstrAlim::Ina219>(0.01, 6.0, 1, address);
-                inaSensors[channel]->configure(AstrAlim::Ina219::RANGE_32V,
-                                               AstrAlim::Ina219::GAIN_AUTO,
-                                               AstrAlim::Ina219::ADC_12BIT,
-                                               AstrAlim::Ina219::ADC_12BIT);
+                inaSensors[channel] = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, address, "", false);
             }
 
-            voltage = std::max(0.0, inaSensors[channel]->voltage());
-            current = std::max(0.0, std::abs(inaSensors[channel]->currentMilliAmps()) / 1000.0);
-            valid = true;
-            currentValid = true;
-            errorTag = "OK";
+            double samplePower = 0.0;
+            valid = inaSensors[channel]->readSample(POLL_INTERVAL_MS / 1000.0, voltage, current, samplePower);
+            if (valid)
+            {
+                currentValid = true;
+                errorTag = "OK";
+            }
+            else
+            {
+                currentValid = false;
+                voltage = 0.0;
+                current = 0.0;
+                errorTag = "IO";
+            }
         }
         catch (const std::exception&)
         {
@@ -2161,17 +2095,9 @@ bool AstrAlimHeater::resetINAChannel(int channel)
 
     try
     {
-        if (!inaSensors[channel])
-        {
-            inaSensors[channel] = std::make_unique<AstrAlim::Ina219>(0.01, 6.0, 1, address);
-        }
-
-        inaSensors[channel]->reset();
+        inaSensors[channel].reset();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        inaSensors[channel]->configure(AstrAlim::Ina219::RANGE_32V,
-                                       AstrAlim::Ina219::GAIN_AUTO,
-                                       AstrAlim::Ina219::ADC_12BIT,
-                                       AstrAlim::Ina219::ADC_12BIT);
+        inaSensors[channel] = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, address, "", false);
         return true;
     }
     catch (const std::exception&)

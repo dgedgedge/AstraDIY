@@ -11,7 +11,7 @@ class AstraComFetcher;
 class AstraComDevice
 {
 public:
-    explicit AstraComDevice(bool eachStep = false, std::string name = "");
+    explicit AstraComDevice(bool eachStep = false, std::string name = "", bool autoRegisterToFetcher = true);
     virtual ~AstraComDevice() = default;
 
     void registerToFetcher(AstraComFetcher* fetcher = nullptr, bool eachStep = false);

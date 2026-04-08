@@ -9,7 +9,12 @@
 
 #include <defaultdevice.h>
 #include <memory>
+#include <array>
 #include "astralim_gpio.h"
+
+namespace AstrAlim {
+class AstraIna;
+}
 
 class AstrAlimRelays : public INDI::DefaultDevice
 {
@@ -35,10 +40,9 @@ private:
     void updateSwitchStates();
     bool setRelay(int relay, bool on);
     void readINA219();
-    std::string execCommand(const char* cmd);
-
     // GPIO controller
     std::unique_ptr<AstrAlim::GpioController> gpio;
+    std::array<std::unique_ptr<AstrAlim::AstraIna>, 3> inaSensors;
 
     // Properties - Active state
     INDI::PropertySwitch ActiveStateSP {2};
