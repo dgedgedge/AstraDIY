@@ -77,6 +77,33 @@ add_executable(test_astra_com
     ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_fetcher.cpp
 )
 target_link_libraries(test_astra_com Threads::Threads)
+set_target_properties(test_astra_com PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tools/build
+)
+
+################ Astra 1-Wire Runtime Test ################
+add_executable(test_astra_1wire
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_astra_1wire.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_1wire_temp_fetcher.cpp
+)
+target_link_libraries(test_astra_1wire Threads::Threads)
+set_target_properties(test_astra_1wire PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tools/build
+)
+
+################ Astra Step PWM Runtime Test ################
+add_executable(test_astra_step_pwm
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_astra_step_pwm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_step_pwm_actor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_actor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_fetcher.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_gpio.cpp
+)
+target_link_libraries(test_astra_step_pwm ${GPIOD_LIBRARIES} Threads::Threads)
+set_target_properties(test_astra_step_pwm PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tools/build
+)
 
 ################ XML Driver Description ################
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim.xml DESTINATION ${INDI_DATA_DIR})
