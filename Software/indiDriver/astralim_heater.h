@@ -26,6 +26,7 @@
 
 namespace AstrAlim {
 class GpioController;
+class Ina219;
 }
 
 class AstrAlimHeater : public INDI::DefaultDevice
@@ -181,6 +182,7 @@ private:
     std::array<bool, 2> inaNoResponseActive = {false, false};
     std::array<std::chrono::steady_clock::time_point, 2> inaNoResponseSince {};
     std::array<std::chrono::steady_clock::time_point, 2> inaLastResetAttempt {};
+    std::array<std::unique_ptr<AstrAlim::Ina219>, 2> inaSensors;
 
     // Constants
     static constexpr int POLL_INTERVAL_MS = 5000;

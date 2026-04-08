@@ -11,7 +11,7 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from AstraIna import AstraIna
+from lib.AstraIna import AstraIna
 
 def main():
     print("=== Diagnostic INA219 pour bandes chauffantes ===\n")

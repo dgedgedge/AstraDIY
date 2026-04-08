@@ -6,7 +6,7 @@ from PyQt5.QtCore import QTimer, Qt, QRect
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                               QLabel, QFrame, QGroupBox, QScrollArea)
 from AstraGpio import AstraGpio
-from AstraIna import AstraIna
+from lib.AstraIna import AstraIna
 from AstraCommonHmi import dataMenu, AnimatedToggleButton
 
 

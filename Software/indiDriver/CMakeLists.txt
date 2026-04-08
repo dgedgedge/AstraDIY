@@ -13,6 +13,7 @@ set(INDI_ASTRALIM_VERSION_MINOR 0)
 
 find_package(INDI REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(Threads REQUIRED)
 
 # Check for libgpiod - support both v1 and v2
 pkg_check_modules(GPIOD REQUIRED libgpiod)
@@ -59,10 +60,23 @@ install(TARGETS indi_astralim_system RUNTIME DESTINATION bin)
 ################ AstrAlim Heater ################
 add_executable(indi_astralim_heater
     ${CMAKE_CURRENT_SOURCE_DIR}/astralim_heater.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_ina219.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_actor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_fetcher.cpp
     ${gpio_SRCS}
 )
-target_link_libraries(indi_astralim_heater ${INDI_LIBRARIES} ${GPIOD_LIBRARIES})
+target_link_libraries(indi_astralim_heater ${INDI_LIBRARIES} ${GPIOD_LIBRARIES} Threads::Threads)
 install(TARGETS indi_astralim_heater RUNTIME DESTINATION bin)
+
+################ AstraCom Runtime Test ################
+add_executable(test_astra_com
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_astra_com.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_actor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/astralim_com_fetcher.cpp
+)
+target_link_libraries(test_astra_com Threads::Threads)
 
 ################ XML Driver Description ################
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/indi_astralim.xml DESTINATION ${INDI_DATA_DIR})

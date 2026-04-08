@@ -5,6 +5,7 @@
 
 #include "astralim_heater.h"
 #include "astralim_gpio.h"
+#include "astralim_ina219.h"
 #include "config.h"
 
 #include <cstring>
@@ -186,7 +187,7 @@ bool AstrAlimHeater::updateProperties()
         defineProperty(Heater2SensorTP);
         defineProperty(Heater2SensorAssignSP);
         // AvailableSensorsSP sera défini dynamiquement après le scan
-        if (AvailableSensorsSP.count() > 0)
+        if (AvailableSensorsSP.size() > 0)
         {
             defineProperty(AvailableSensorsSP);
         }
@@ -211,7 +212,7 @@ bool AstrAlimHeater::updateProperties()
         deleteProperty(Heater2ModeSP);
         deleteProperty(Heater2SensorTP);
         deleteProperty(Heater2SensorAssignSP);
-        if (AvailableSensorsSP.count() > 0)
+        if (AvailableSensorsSP.size() > 0)
         {
             deleteProperty(AvailableSensorsSP);
         }
@@ -1613,9 +1614,9 @@ void AstrAlimHeater::updateSensorStatusList(bool rescanDevices)
     
     // Sauvegarder quel capteur est actuellement sélectionné (si la propriété existe déjà)
     std::string selectedSensorId;
-    if (AvailableSensorsSP.count() > 0)
+    if (AvailableSensorsSP.size() > 0)
     {
-        for (size_t i = 0; i < AvailableSensorsSP.count() && i < availableDS18B20.size(); i++)
+        for (size_t i = 0; i < AvailableSensorsSP.size() && i < availableDS18B20.size(); i++)
         {
             if (AvailableSensorsSP[i].getState() == ISS_ON)
             {
@@ -1626,8 +1627,8 @@ void AstrAlimHeater::updateSensorStatusList(bool rescanDevices)
     }
     
     // Vérifier si le nombre de capteurs a changé ou si la propriété n'existe pas encore
-    bool needRedefine = (AvailableSensorsSP.count() != sensorCount);
-    bool propertyExists = (AvailableSensorsSP.count() > 0);
+    bool needRedefine = (AvailableSensorsSP.size() != sensorCount);
+    bool propertyExists = (AvailableSensorsSP.size() > 0);
     
     // Si connecté et qu'on a besoin de créer/modifier la propriété
     if (isConnected())
@@ -1659,7 +1660,7 @@ void AstrAlimHeater::updateSensorStatusList(bool rescanDevices)
             AvailableSensorsSP.resize(0);
         }
     }
-    else if (sensorCount > 0 && AvailableSensorsSP.count() == 0)
+    else if (sensorCount > 0 && AvailableSensorsSP.size() == 0)
     {
         // Préparer la propriété même si pas encore connecté (pour initProperties)
         AvailableSensorsSP.resize(sensorCount);
@@ -1673,9 +1674,9 @@ void AstrAlimHeater::updateSensorStatusList(bool rescanDevices)
     }
     
     // Mettre à jour la liste avec les capteurs disponibles (seulement si la propriété existe)
-    if (AvailableSensorsSP.count() > 0 && sensorCount > 0)
+    if (AvailableSensorsSP.size() > 0 && sensorCount > 0)
     {
-        for (size_t i = 0; i < sensorCount && i < AvailableSensorsSP.count(); i++)
+        for (size_t i = 0; i < sensorCount && i < AvailableSensorsSP.size(); i++)
         {
             const std::string& sensorId = availableDS18B20[i];
             double temp = TEMP_UNAVAILABLE;
@@ -2008,96 +2009,6 @@ void AstrAlimHeater::readINA219()
 {
     // Read INA219 sensors for heaters (AstraPwm1 and AstraPwm2)
     // Addresses (INDI mapping): 0x4d (Heater 1), 0x49 (Heater 2)
-    // Format: voltage_mV;current_mA for each heater
-    // Use integer payload to avoid locale-dependent float parsing issues.
-    std::string result = execCommand(
-        "python3 -c \""
-        "import os\n"
-        "import sys\n"
-        "import glob\n"
-        "import time\n"
-        "import fcntl\n"
-        "lockf = open('/tmp/astradiy_i2c.lock', 'w')\n"
-        "fcntl.flock(lockf, fcntl.LOCK_EX)\n"
-        "base_paths = [\n"
-        "    '/opt/AstraDIY/Software/pythonDrivers',\n"
-        "    '/opt/AstraDIY',\n"
-        "    '/opt/AstrAlim/Software/pythonDrivers',\n"
-        "    '/opt/AstrAlim',\n"
-        "    '/root/AstraDIY/Software/pythonDrivers',\n"
-        "    '/home/stellarmate/AstraDIY/Software/pythonDrivers',\n"
-        "    '/home/stellarmate/Documents/AstraDIY/Software/pythonDrivers',\n"
-        "]\n"
-        "dynamic_paths = glob.glob('/home/*/AstraDIY/Software/pythonDrivers') + glob.glob('/home/*/Documents/AstraDIY/Software/pythonDrivers')\n"
-        "for p in base_paths + dynamic_paths:\n"
-        "    if os.path.isdir(p) and p not in sys.path:\n"
-        "        sys.path.insert(0, p)\n"
-        "try:\n"
-        "    from lib.ina219 import INA219\n"
-        "    def read_addr(addr):\n"
-        "        last_err = 'ERR'\n"
-        "        for _ in range(4):\n"
-        "            try:\n"
-        "                ina = INA219(0.01, 6, busnum=1, address=addr)\n"
-        "                ina.configure()\n"
-        "                v_mv = max(int(round(ina.voltage() * 1000.0)), 0)\n"
-        "                try:\n"
-        "                    i_ma = max(int(round(abs(ina.current()))), 0)\n"
-        "                    return f'1;{v_mv};{i_ma};OK'\n"
-        "                except Exception as current_err:\n"
-        "                    return f'1;{v_mv};-1;CUR_{current_err.__class__.__name__}'\n"
-        "            except Exception as sample_err:\n"
-        "                last_err = f'IO_{sample_err.__class__.__name__}'\n"
-        "                time.sleep(0.01)\n"
-        "        return f'0;0;0;{last_err}'\n"
-        "    print('|'.join(read_addr(addr) for addr in [0x4d, 0x49]))\n"
-        "except Exception as e:\n"
-        "    err = f'IMPORT_{e.__class__.__name__}'\n"
-        "    print(f'0;0;0;{err}|0;0;0;{err}')\n"
-        "\" 2>/dev/null"
-    );
-    
-    if (result.empty())
-    {
-        PowerMonitorNP.setState(IPS_ALERT);
-        PowerMonitorNP.apply();
-        return;
-    }
-    
-    // Parse result: ok;v1_mV;i1_mA;err|ok;v2_mV;i2_mA;err
-    std::istringstream iss(result);
-    std::string heaterData;
-    
-    auto parseSample = [](const std::string& input, bool& valid, bool& currentValid, double& voltage, double& current, std::string& errorTag)
-    {
-        int ok = 0;
-        long vMilli = 0;
-        long cMilli = 0;
-        char errBuf[96] = {0};
-        int parsedCount = sscanf(input.c_str(), "%d;%ld;%ld;%95s", &ok, &vMilli, &cMilli, errBuf);
-        if (parsedCount >= 3)
-        {
-            valid = (ok == 1);
-            voltage = std::max(0.0, static_cast<double>(vMilli) / 1000.0);
-            currentValid = valid && (cMilli >= 0);
-            current = currentValid ? std::max(0.0, static_cast<double>(cMilli) / 1000.0) : 0.0;
-            if (parsedCount == 4 && errBuf[0] != '\0')
-                errorTag = errBuf;
-            else if (!valid)
-                errorTag = "INVALID";
-            else if (!currentValid)
-                errorTag = "CUR_MISSING";
-            else
-                errorTag = "OK";
-            return;
-        }
-        valid = false;
-        currentValid = false;
-        voltage = 0.0;
-        current = 0.0;
-        errorTag = "PARSE";
-    };
-
     bool valid1 = false;
     bool valid2 = false;
     bool currentValid1 = false;
@@ -2109,17 +2020,39 @@ void AstrAlimHeater::readINA219()
     std::string errorTag1 = "MISSING";
     std::string errorTag2 = "MISSING";
 
-    // Heater 1 (INDI mapped to address 0x4d)
-    if (std::getline(iss, heaterData, '|'))
+    auto readChannel = [this](int channel, int address, bool& valid, bool& currentValid,
+                              double& voltage, double& current, std::string& errorTag)
     {
-        parseSample(heaterData, valid1, currentValid1, sampleV1, sampleI1, errorTag1);
-    }
-    
-    // Heater 2 (INDI mapped to address 0x49)
-    if (std::getline(iss, heaterData, '|'))
-    {
-        parseSample(heaterData, valid2, currentValid2, sampleV2, sampleI2, errorTag2);
-    }
+        try
+        {
+            if (!inaSensors[channel])
+            {
+                inaSensors[channel] = std::make_unique<AstrAlim::Ina219>(0.01, 6.0, 1, address);
+                inaSensors[channel]->configure(AstrAlim::Ina219::RANGE_32V,
+                                               AstrAlim::Ina219::GAIN_AUTO,
+                                               AstrAlim::Ina219::ADC_12BIT,
+                                               AstrAlim::Ina219::ADC_12BIT);
+            }
+
+            voltage = std::max(0.0, inaSensors[channel]->voltage());
+            current = std::max(0.0, std::abs(inaSensors[channel]->currentMilliAmps()) / 1000.0);
+            valid = true;
+            currentValid = true;
+            errorTag = "OK";
+        }
+        catch (const std::exception&)
+        {
+            valid = false;
+            currentValid = false;
+            voltage = 0.0;
+            current = 0.0;
+            errorTag = "IO";
+            inaSensors[channel].reset();
+        }
+    };
+
+    readChannel(0, INA_ADDR_H1, valid1, currentValid1, sampleV1, sampleI1, errorTag1);
+    readChannel(1, INA_ADDR_H2, valid2, currentValid2, sampleV2, sampleI2, errorTag2);
 
     const bool heater1Active = (Heater1PowerNP[0].getValue() > 1.0);
     const bool heater2Active = (Heater2PowerNP[0].getValue() > 1.0);
@@ -2224,13 +2157,28 @@ bool AstrAlimHeater::resetINAChannel(int channel)
     if (channel < 0 || channel > 1)
         return false;
 
-    const int addr = (channel == 0) ? INA_ADDR_H1 : INA_ADDR_H2;
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd),
-             "python3 -c \"import fcntl,smbus,time; lockf=open('/tmp/astradiy_i2c.lock','w'); fcntl.flock(lockf, fcntl.LOCK_EX); bus=smbus.SMBus(1); bus.write_i2c_block_data(0x%02x, 0x00, [0x80, 0x00]); time.sleep(0.02); print('ok')\" 2>/dev/null",
-             addr);
-    std::string result = execCommand(cmd);
-    return result == "ok";
+    const int address = (channel == 0) ? INA_ADDR_H1 : INA_ADDR_H2;
+
+    try
+    {
+        if (!inaSensors[channel])
+        {
+            inaSensors[channel] = std::make_unique<AstrAlim::Ina219>(0.01, 6.0, 1, address);
+        }
+
+        inaSensors[channel]->reset();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        inaSensors[channel]->configure(AstrAlim::Ina219::RANGE_32V,
+                                       AstrAlim::Ina219::GAIN_AUTO,
+                                       AstrAlim::Ina219::ADC_12BIT,
+                                       AstrAlim::Ina219::ADC_12BIT);
+        return true;
+    }
+    catch (const std::exception&)
+    {
+        inaSensors[channel].reset();
+        return false;
+    }
 }
 
 void AstrAlimHeater::resetINADisplayState()
