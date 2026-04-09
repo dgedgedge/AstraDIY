@@ -14,6 +14,163 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+namespace
+{
+template <typename P>
+auto numSetMin(P& prop, int index, double value) -> decltype(prop[index].setMin(value), void())
+{
+    prop[index].setMin(value);
+}
+
+inline void numSetMin(INumberVectorProperty& prop, int index, double value)
+{
+    prop.np[index].min = value;
+}
+
+template <typename P>
+auto numSetMax(P& prop, int index, double value) -> decltype(prop[index].setMax(value), void())
+{
+    prop[index].setMax(value);
+}
+
+inline void numSetMax(INumberVectorProperty& prop, int index, double value)
+{
+    prop.np[index].max = value;
+}
+
+template <typename P>
+auto numSetStep(P& prop, int index, double value) -> decltype(prop[index].setStep(value), void())
+{
+    prop[index].setStep(value);
+}
+
+inline void numSetStep(INumberVectorProperty& prop, int index, double value)
+{
+    prop.np[index].step = value;
+}
+
+template <typename P>
+auto numSetValue(P& prop, int index, double value) -> decltype(prop[index].setValue(value), void())
+{
+    prop[index].setValue(value);
+}
+
+inline void numSetValue(INumberVectorProperty& prop, int index, double value)
+{
+    prop.np[index].value = value;
+}
+
+template <typename P>
+auto numGetMin(P& prop, int index) -> decltype(prop[index].getMin())
+{
+    return prop[index].getMin();
+}
+
+inline double numGetMin(INumberVectorProperty& prop, int index)
+{
+    return prop.np[index].min;
+}
+
+template <typename P>
+auto numGetMax(P& prop, int index) -> decltype(prop[index].getMax())
+{
+    return prop[index].getMax();
+}
+
+inline double numGetMax(INumberVectorProperty& prop, int index)
+{
+    return prop.np[index].max;
+}
+
+template <typename P>
+auto numGetStep(P& prop, int index) -> decltype(prop[index].getStep())
+{
+    return prop[index].getStep();
+}
+
+inline double numGetStep(INumberVectorProperty& prop, int index)
+{
+    return prop.np[index].step;
+}
+
+template <typename P>
+auto numGetValue(P& prop, int index) -> decltype(prop[index].getValue())
+{
+    return prop[index].getValue();
+}
+
+inline double numGetValue(INumberVectorProperty& prop, int index)
+{
+    return prop.np[index].value;
+}
+
+template <typename P>
+auto numSetState(P& prop, IPState state) -> decltype(prop.setState(state), void())
+{
+    prop.setState(state);
+}
+
+inline void numSetState(INumberVectorProperty& prop, IPState state)
+{
+    prop.s = state;
+}
+
+template <typename P>
+auto numApply(P& prop) -> decltype(prop.apply(), void())
+{
+    prop.apply();
+}
+
+inline void numApply(INumberVectorProperty& prop)
+{
+    IDSetNumber(&prop, nullptr);
+}
+
+template <typename P>
+auto numIsNameMatch(P& prop, const char* name) -> decltype(prop.isNameMatch(name), bool())
+{
+    return prop.isNameMatch(name);
+}
+
+inline bool numIsNameMatch(INumberVectorProperty& prop, const char* name)
+{
+    return strcmp(prop.name, name) == 0;
+}
+
+template <typename P>
+auto numUpdate(P& prop, double values[], char* names[], int n) -> decltype(prop.update(values, names, n), void())
+{
+    prop.update(values, names, n);
+}
+
+inline void numUpdate(INumberVectorProperty& prop, double values[], char* names[], int n)
+{
+    IUUpdateNumber(&prop, values, names, n);
+}
+
+template <typename P>
+auto swGetState(P& prop, int index) -> decltype(prop[index].getState())
+{
+    return prop[index].getState();
+}
+
+inline ISState swGetState(ISwitchVectorProperty& prop, int index)
+{
+    return prop.sp[index].s;
+}
+
+template <typename P>
+auto swSetState(P& prop, int index, ISState state) -> decltype(prop[index].setState(state), void())
+{
+    prop[index].setState(state);
+}
+
+inline void swSetState(ISwitchVectorProperty& prop, int index, ISState state)
+{
+    prop.sp[index].s = state;
+}
+} // namespace
+
 // Sleep macro (milliseconds)
 #define msleep(ms) usleep((ms) * 1000)
 
@@ -106,32 +263,32 @@ bool AstrAlimFocuser::initProperties()
     ScopeParametersNP[1].fill("TELESCOPE_FOCAL_LENGTH", "Focal Length (mm)", "%g", 10, 10000, 0, 0);
     ScopeParametersNP.fill(ActiveTelescopeTP[0].getText(), "TELESCOPE_INFO", "Scope Properties", OPTIONS_TAB, IP_RW, 60, IPS_OK);
     
-    // Set initial position limits using INDI 2.x API
-    FocusMaxPosN[0].min = MINMAX_MIN_POS;
-    FocusMaxPosN[0].max = MINMAX_MAX_POS;
-    FocusMaxPosN[0].step = MINMAX_MAX_POS / 100;
-    FocusMaxPosN[0].value = MINMAX_MAX_POS / 10;
+    // Set initial position limits
+    numSetMin(FocusMaxPosNP, 0, MINMAX_MIN_POS);
+    numSetMax(FocusMaxPosNP, 0, MINMAX_MAX_POS);
+    numSetStep(FocusMaxPosNP, 0, MINMAX_MAX_POS / 100);
+    numSetValue(FocusMaxPosNP, 0, MINMAX_MAX_POS / 10);
 
-    FocusAbsPosN[0].min = 0;
-    FocusAbsPosN[0].max = FocusMaxPosN[0].value;
-    FocusAbsPosN[0].step = FocusAbsPosN[0].max / 100;
+    numSetMin(FocusAbsPosNP, 0, 0);
+    numSetMax(FocusAbsPosNP, 0, numGetValue(FocusMaxPosNP, 0));
+    numSetStep(FocusAbsPosNP, 0, numGetMax(FocusAbsPosNP, 0) / 100);
 
-    FocusRelPosN[0].min = 0;
-    FocusRelPosN[0].max = FocusAbsPosN[0].max / 10;
-    FocusRelPosN[0].step = FocusRelPosN[0].max / 10;
-    FocusRelPosN[0].value = FocusRelPosN[0].max / 10;
+    numSetMin(FocusRelPosNP, 0, 0);
+    numSetMax(FocusRelPosNP, 0, numGetMax(FocusAbsPosNP, 0) / 10);
+    numSetStep(FocusRelPosNP, 0, numGetMax(FocusRelPosNP, 0) / 10);
+    numSetValue(FocusRelPosNP, 0, numGetMax(FocusRelPosNP, 0) / 10);
 
-    FocusSyncN[0].min = 0;
-    FocusSyncN[0].max = FocusAbsPosN[0].max;
-    FocusSyncN[0].step = FocusAbsPosN[0].max / 100;
+    numSetMin(FocusSyncNP, 0, 0);
+    numSetMax(FocusSyncNP, 0, numGetMax(FocusAbsPosNP, 0));
+    numSetStep(FocusSyncNP, 0, numGetMax(FocusAbsPosNP, 0) / 100);
 
-    FocusBacklashN[0].min = 0;
-    FocusBacklashN[0].max = FocusAbsPosN[0].max / 100;
-    FocusBacklashN[0].step = FocusBacklashN[0].max / 100;
+    numSetMin(FocusBacklashNP, 0, 0);
+    numSetMax(FocusBacklashNP, 0, numGetMax(FocusAbsPosNP, 0) / 100);
+    numSetStep(FocusBacklashNP, 0, numGetMax(FocusBacklashNP, 0) / 100);
     
     // Default direction
-    FocusMotionS[FOCUS_OUTWARD].s = ISS_ON;
-    FocusMotionS[FOCUS_INWARD].s = ISS_OFF;
+    swSetState(FocusMotionSP, FOCUS_OUTWARD, ISS_ON);
+    swSetState(FocusMotionSP, FOCUS_INWARD, ISS_OFF);
     
     // Add debug control
     addDebugControl();
@@ -267,11 +424,11 @@ bool AstrAlimFocuser::Connect()
     int savedPos = loadPosition();
     if (savedPos >= 0)
     {
-        FocusAbsPosN[0].value = savedPos * resolution / MAX_RESOLUTION;
+        numSetValue(FocusAbsPosNP, 0, savedPos * resolution / MAX_RESOLUTION);
     }
     else
     {
-        FocusAbsPosN[0].value = 0;
+        numSetValue(FocusAbsPosNP, 0, 0);
     }
     
     // Set resolution
@@ -328,13 +485,13 @@ IPState AstrAlimFocuser::MoveAbsFocuser(uint32_t targetTicks)
         return IPS_BUSY;
     }
     
-    if (targetTicks < FocusAbsPosN[0].min || targetTicks > FocusAbsPosN[0].max)
+    if (targetTicks < numGetMin(FocusAbsPosNP, 0) || targetTicks > numGetMax(FocusAbsPosNP, 0))
     {
         LOG_WARN("Requested position is out of range");
         return IPS_ALERT;
     }
     
-    if (targetTicks == static_cast<uint32_t>(FocusAbsPosN[0].value))
+    if (targetTicks == static_cast<uint32_t>(numGetValue(FocusAbsPosNP, 0)))
     {
         LOG_INFO("Already at requested position");
         return IPS_OK;
@@ -347,7 +504,7 @@ IPState AstrAlimFocuser::MoveAbsFocuser(uint32_t targetTicks)
     int newDirection;
     const char* directionName;
     
-    if (targetTicks > FocusAbsPosN[0].value)
+    if (targetTicks > numGetValue(FocusAbsPosNP, 0))
     {
         newDirection = 1;
         directionName = "outward";
@@ -359,10 +516,10 @@ IPState AstrAlimFocuser::MoveAbsFocuser(uint32_t targetTicks)
     }
     
     // Handle backlash if direction changed
-    if (newDirection != stepperDirection && FocusBacklashN[0].value != 0 && FocusBacklashS[INDI_ENABLED].s == ISS_ON)
+    if (newDirection != stepperDirection && numGetValue(FocusBacklashNP, 0) != 0 && swGetState(FocusBacklashSP, INDI_ENABLED) == ISS_ON)
     {
-        LOGF_INFO("Compensating backlash by %.0f steps", FocusBacklashN[0].value);
-        backlashTicksRemaining = static_cast<int>(FocusBacklashN[0].value);
+        LOGF_INFO("Compensating backlash by %.0f steps", numGetValue(FocusBacklashNP, 0));
+        backlashTicksRemaining = static_cast<int>(numGetValue(FocusBacklashNP, 0));
     }
     else
     {
@@ -370,7 +527,7 @@ IPState AstrAlimFocuser::MoveAbsFocuser(uint32_t targetTicks)
     }
     
     stepperDirection = newDirection;
-    focuserTicksRemaining = std::abs(static_cast<int>(targetTicks) - static_cast<int>(FocusAbsPosN[0].value));
+    focuserTicksRemaining = std::abs(static_cast<int>(targetTicks) - static_cast<int>(numGetValue(FocusAbsPosNP, 0)));
     
     LOGF_INFO("Moving focuser %s to position %d", directionName, targetTicks);
     
@@ -381,7 +538,7 @@ IPState AstrAlimFocuser::MoveAbsFocuser(uint32_t targetTicks)
 
 IPState AstrAlimFocuser::MoveRelFocuser(FocusDirection dir, uint32_t ticks)
 {
-    int32_t newPos = static_cast<int32_t>(FocusAbsPosN[0].value) + (ticks * (dir == FOCUS_INWARD ? -1 : 1));
+    int32_t newPos = static_cast<int32_t>(numGetValue(FocusAbsPosNP, 0)) + (ticks * (dir == FOCUS_INWARD ? -1 : 1));
     return MoveAbsFocuser(static_cast<uint32_t>(std::max(0, newPos)));
 }
 
@@ -420,14 +577,14 @@ void AstrAlimFocuser::TimerHit()
     if (backlashTicksRemaining == 0 && focuserTicksRemaining == 0)
     {
         // Save position
-        savePosition(static_cast<int>(FocusAbsPosN[0].value) * MAX_RESOLUTION / resolution);
+        savePosition(static_cast<int>(numGetValue(FocusAbsPosNP, 0)) * MAX_RESOLUTION / resolution);
 
-        FocusAbsPosNP.s = IPS_OK;
-        IDSetNumber(&FocusAbsPosNP, nullptr);
-        FocusRelPosNP.s = IPS_OK;
-        IDSetNumber(&FocusRelPosNP, nullptr);
+        numSetState(FocusAbsPosNP, IPS_OK);
+        numApply(FocusAbsPosNP);
+        numSetState(FocusRelPosNP, IPS_OK);
+        numApply(FocusRelPosNP);
 
-        LOGF_INFO("Focuser at position %.0f", FocusAbsPosN[0].value);
+        LOGF_INFO("Focuser at position %.0f", numGetValue(FocusAbsPosNP, 0));
         
         // Reset temperature reference
         lastTemperature = FocusTemperatureNP[0].getValue();
@@ -446,11 +603,11 @@ void AstrAlimFocuser::TimerHit()
     int dirValue;
     if (stepperDirection == 1)
     {
-        dirValue = (FocusReverseS[INDI_ENABLED].s == ISS_ON) ? 0 : 1;
+        dirValue = (swGetState(FocusReverseSP, INDI_ENABLED) == ISS_ON) ? 0 : 1;
     }
     else
     {
-        dirValue = (FocusReverseS[INDI_ENABLED].s == ISS_ON) ? 1 : 0;
+        dirValue = (swGetState(FocusReverseSP, INDI_ENABLED) == ISS_ON) ? 1 : 0;
     }
     gpio->setValue(AstrAlim::FocuserPins::DIR, dirValue);
     
@@ -466,8 +623,8 @@ void AstrAlimFocuser::TimerHit()
     else
     {
         focuserTicksRemaining--;
-        FocusAbsPosN[0].value += stepperDirection;
-        IDSetNumber(&FocusAbsPosNP, nullptr);
+        numSetValue(FocusAbsPosNP, 0, numGetValue(FocusAbsPosNP, 0) + stepperDirection);
+        numApply(FocusAbsPosNP);
     }
     
     SetTimer(static_cast<uint32_t>(FocusStepDelayNP[0].getValue()));
@@ -722,7 +879,7 @@ void AstrAlimFocuser::updateFocuserInfo()
     }
     
     float cfz = 4.88f * 0.520f * f_ratio * f_ratio;
-    float step_size = 1000.0f * travel_mm / FocusMaxPosN[0].value;
+    float step_size = 1000.0f * travel_mm / numGetValue(FocusMaxPosNP, 0);
     float steps_per_cfz = (step_size > 0) ? cfz / step_size : 0;
     
     FocuserInfoNP[0].setValue(step_size);
@@ -793,11 +950,11 @@ bool AstrAlimFocuser::ISNewNumber(const char* dev, const char* name, double valu
         }
         
         // Max position changed
-        if (strcmp(name, FocusMaxPosNP.name) == 0)
+        if (numIsNameMatch(FocusMaxPosNP, name))
         {
-            IUUpdateNumber(&FocusMaxPosNP, values, names, n);
+            numUpdate(FocusMaxPosNP, values, names, n);
             updateFocuserInfo();
-            IDSetNumber(&FocusMaxPosNP, nullptr);
+            numApply(FocusMaxPosNP);
         }
     }
     
@@ -874,30 +1031,30 @@ bool AstrAlimFocuser::ISNewSwitch(const char* dev, const char* name, ISState* st
             // Update all position-related values
             double ratio = static_cast<double>(resolution) / lastResolution;
             
-            FocusMaxPosN[0].max *= ratio;
-            FocusMaxPosN[0].step *= ratio;
-            FocusMaxPosN[0].value *= ratio;
+            numSetMax(FocusMaxPosNP, 0, numGetMax(FocusMaxPosNP, 0) * ratio);
+            numSetStep(FocusMaxPosNP, 0, numGetStep(FocusMaxPosNP, 0) * ratio);
+            numSetValue(FocusMaxPosNP, 0, numGetValue(FocusMaxPosNP, 0) * ratio);
 
-            FocusAbsPosN[0].max *= ratio;
-            FocusAbsPosN[0].step *= ratio;
-            FocusAbsPosN[0].value *= ratio;
+            numSetMax(FocusAbsPosNP, 0, numGetMax(FocusAbsPosNP, 0) * ratio);
+            numSetStep(FocusAbsPosNP, 0, numGetStep(FocusAbsPosNP, 0) * ratio);
+            numSetValue(FocusAbsPosNP, 0, numGetValue(FocusAbsPosNP, 0) * ratio);
 
-            FocusRelPosN[0].max *= ratio;
-            FocusRelPosN[0].step *= ratio;
-            FocusRelPosN[0].value *= ratio;
+            numSetMax(FocusRelPosNP, 0, numGetMax(FocusRelPosNP, 0) * ratio);
+            numSetStep(FocusRelPosNP, 0, numGetStep(FocusRelPosNP, 0) * ratio);
+            numSetValue(FocusRelPosNP, 0, numGetValue(FocusRelPosNP, 0) * ratio);
 
-            FocusSyncN[0].max *= ratio;
-            FocusSyncN[0].step *= ratio;
+            numSetMax(FocusSyncNP, 0, numGetMax(FocusSyncNP, 0) * ratio);
+            numSetStep(FocusSyncNP, 0, numGetStep(FocusSyncNP, 0) * ratio);
 
-            FocusBacklashN[0].max *= ratio;
-            FocusBacklashN[0].step *= ratio;
-            FocusBacklashN[0].value *= ratio;
+            numSetMax(FocusBacklashNP, 0, numGetMax(FocusBacklashNP, 0) * ratio);
+            numSetStep(FocusBacklashNP, 0, numGetStep(FocusBacklashNP, 0) * ratio);
+            numSetValue(FocusBacklashNP, 0, numGetValue(FocusBacklashNP, 0) * ratio);
 
-            IDSetNumber(&FocusMaxPosNP, nullptr);
-            IDSetNumber(&FocusAbsPosNP, nullptr);
-            IDSetNumber(&FocusRelPosNP, nullptr);
-            IDSetNumber(&FocusSyncNP, nullptr);
-            IDSetNumber(&FocusBacklashNP, nullptr);
+            numApply(FocusMaxPosNP);
+            numApply(FocusAbsPosNP);
+            numApply(FocusRelPosNP);
+            numApply(FocusSyncNP);
+            numApply(FocusBacklashNP);
             
             updateFocuserInfo();
             
@@ -1048,7 +1205,7 @@ void AstrAlimFocuser::temperatureCompensation()
         if (std::abs(thermalExpansion) > FocuserInfoNP[1].getValue() / 2)
         {
             int adjustment = static_cast<int>(std::round((thermalExpansion / FocuserInfoNP[0].getValue()) / 2));
-            MoveAbsFocuser(static_cast<uint32_t>(FocusAbsPosN[0].value + adjustment));
+            MoveAbsFocuser(static_cast<uint32_t>(numGetValue(FocusAbsPosNP, 0) + adjustment));
             lastTemperature = FocusTemperatureNP[0].getValue();
             LOGF_INFO("Focuser adjusted by %d steps due to %.2f°C temperature change", adjustment, deltaTemp);
         }
