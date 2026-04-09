@@ -8,6 +8,7 @@
 #define ASTRALIM_SYSTEM_H
 
 #include <defaultdevice.h>
+#include <deque>
 #include <string>
 
 class AstrAlimSystem : public INDI::DefaultDevice
@@ -32,6 +33,7 @@ private:
     void updateSystemInfo();
     void updateTime();
     void updateDiskSpace();
+    void updateNtpInfo();
     std::string execCommand(const char* cmd);
     std::string formatDiskSpace(const std::string& device, const std::string& mountPoint, 
                                  const std::string& size, const std::string& used, const std::string& avail, 
@@ -45,6 +47,9 @@ private:
     
     // Properties - Disk Space (root + up to 4 USB drives)
     INDI::PropertyText DiskSpaceTP {5};
+
+    // Properties - NTP metrics (aligned with AstraGps Python calculations)
+    INDI::PropertyText NtpInfoTP {6};
     
     // Properties - System Control
     INDI::PropertySwitch SysControlSP {2};
@@ -57,6 +62,12 @@ private:
     int pollCounter = 0;
     static constexpr int POLL_INTERVAL_MS = 1000;
     static constexpr int INFO_UPDATE_CYCLES = 60;
+
+    // NTP rolling samples (same spirit as Python module)
+    std::deque<double> ntpOffsetsS;
+    std::deque<double> ntpDelaysS;
+    std::deque<double> ntpRootDispersionS;
+    static constexpr size_t NTP_MAX_SAMPLES = 20;
 };
 
 #endif // ASTRALIM_SYSTEM_H

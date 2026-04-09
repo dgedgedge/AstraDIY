@@ -13,6 +13,76 @@
 #include <memory>
 #include <sstream>
 #include <vector>
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <numeric>
+#include <regex>
+
+namespace
+{
+std::string trim(const std::string& value)
+{
+    const auto begin = std::find_if(value.begin(), value.end(), [](unsigned char c) { return !std::isspace(c); });
+    if (begin == value.end())
+        return "";
+
+    const auto rbegin = std::find_if(value.rbegin(), value.rend(), [](unsigned char c) { return !std::isspace(c); });
+    return std::string(begin, rbegin.base());
+}
+
+double meanValue(const std::deque<double>& samples)
+{
+    if (samples.empty())
+        return 0.0;
+
+    const double sum = std::accumulate(samples.begin(), samples.end(), 0.0);
+    return sum / static_cast<double>(samples.size());
+}
+
+double sampleStdDev(const std::deque<double>& samples)
+{
+    if (samples.size() <= 1)
+        return 0.0;
+
+    const double mean = meanValue(samples);
+    double sqSum = 0.0;
+    for (const double value : samples)
+    {
+        const double delta = value - mean;
+        sqSum += delta * delta;
+    }
+
+    return std::sqrt(sqSum / static_cast<double>(samples.size() - 1));
+}
+
+bool parseFirstDouble(const std::string& line, double& outValue)
+{
+    static const std::regex kNumberRegex(R"([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)");
+    std::smatch match;
+    if (!std::regex_search(line, match, kNumberRegex))
+        return false;
+
+    try
+    {
+        outValue = std::stod(match.str(0));
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+std::string extractClockHms(const std::string& value)
+{
+    static const std::regex kClockRegex(R"((\d{2}:\d{2}:\d{2}))");
+    std::smatch match;
+    if (std::regex_search(value, match, kClockRegex))
+        return match.str(1);
+    return value;
+}
+} // namespace
 
 // Singleton instance
 static std::unique_ptr<AstrAlimSystem> systemInstance(new AstrAlimSystem());
@@ -52,6 +122,15 @@ bool AstrAlimSystem::initProperties()
     DiskSpaceTP[3].fill("USB3", "USB 3", nullptr);
     DiskSpaceTP[4].fill("USB4", "USB 4", nullptr);
     DiskSpaceTP.fill(getDeviceName(), "DISK_SPACE", "Espace disque", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+
+    // NTP metrics (same values as calculated in Python GPS module)
+    NtpInfoTP[0].fill("NTP_TIME", "HEURE NTP (UTC)", nullptr);
+    NtpInfoTP[1].fill("NTP_PRECISION_US", "PRECISION (us)", nullptr);
+    NtpInfoTP[2].fill("NTP_OFFSET_US", "DECALAGE (us)", nullptr);
+    NtpInfoTP[3].fill("NTP_ROOT_DISP_MS", "Root Dispersion (ms)", nullptr);
+    NtpInfoTP[4].fill("NTP_DISP_MS", "DISPERSION (ms)", nullptr);
+    NtpInfoTP[5].fill("NTP_JITTER_MS", "JITTER (ms)", nullptr);
+    NtpInfoTP.fill(getDeviceName(), "NTP_INFO", "NTP", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
     
     // System Control
     SysControlSP[CTRL_REBOOT].fill("REBOOT", "Reboot", ISS_OFF);
@@ -78,6 +157,7 @@ bool AstrAlimSystem::updateProperties()
         defineProperty(SysTimeTP);
         defineProperty(SysInfoTP);
         defineProperty(DiskSpaceTP);
+        defineProperty(NtpInfoTP);
         defineProperty(SysControlSP);
     }
     else
@@ -85,6 +165,7 @@ bool AstrAlimSystem::updateProperties()
         deleteProperty(SysTimeTP);
         deleteProperty(SysInfoTP);
         deleteProperty(DiskSpaceTP);
+        deleteProperty(NtpInfoTP);
         deleteProperty(SysControlSP);
         deleteProperty(SysConfirmSP);
     }
@@ -97,6 +178,7 @@ bool AstrAlimSystem::Connect()
     // Get initial system info
     updateSystemInfo();
     updateDiskSpace();
+    updateNtpInfo();
     
     // Start timer
     SetTimer(POLL_INTERVAL_MS);
@@ -118,6 +200,7 @@ void AstrAlimSystem::TimerHit()
     
     // Update time every tick
     updateTime();
+    updateNtpInfo();
     
     // Update system info less frequently
     if (++pollCounter >= INFO_UPDATE_CYCLES)
@@ -128,6 +211,122 @@ void AstrAlimSystem::TimerHit()
     }
     
     SetTimer(POLL_INTERVAL_MS);
+}
+
+void AstrAlimSystem::updateNtpInfo()
+{
+    // Pull all needed metrics in one call.
+    const std::string tracking = execCommand("chronyc tracking 2>/dev/null");
+    if (tracking.empty())
+    {
+        NtpInfoTP[0].setText("--:--:--");
+        NtpInfoTP[1].setText("--");
+        NtpInfoTP[2].setText("--");
+        NtpInfoTP[3].setText("--");
+        NtpInfoTP[4].setText("--");
+        NtpInfoTP[5].setText("--");
+        NtpInfoTP.setState(IPS_IDLE);
+        NtpInfoTP.apply();
+        return;
+    }
+
+    std::string refTime = "Unknown";
+    double offsetS = 0.0;
+    double rootDelayS = 0.0;
+    double rootDispersionS = 0.0;
+
+    bool hasOffset = false;
+    bool hasRootDelay = false;
+    bool hasRootDispersion = false;
+
+    std::istringstream stream(tracking);
+    std::string line;
+    while (std::getline(stream, line))
+    {
+        if (line.find("Ref time (UTC)") != std::string::npos)
+        {
+            const size_t colonPos = line.find(':');
+            if (colonPos != std::string::npos)
+                refTime = trim(line.substr(colonPos + 1));
+        }
+        else if (line.find("System time") != std::string::npos)
+        {
+            double parsed = 0.0;
+            if (parseFirstDouble(line, parsed))
+            {
+                // Same spirit as Python module: uncertainty uses absolute mean offset.
+                offsetS = std::fabs(parsed);
+                hasOffset = true;
+            }
+        }
+        else if (line.find("Root delay") != std::string::npos)
+        {
+            double parsed = 0.0;
+            if (parseFirstDouble(line, parsed))
+            {
+                rootDelayS = std::fabs(parsed);
+                hasRootDelay = true;
+            }
+        }
+        else if (line.find("Root dispersion") != std::string::npos)
+        {
+            double parsed = 0.0;
+            if (parseFirstDouble(line, parsed))
+            {
+                rootDispersionS = std::fabs(parsed);
+                hasRootDispersion = true;
+            }
+        }
+    }
+
+    if (hasOffset)
+    {
+        ntpOffsetsS.push_back(offsetS);
+        if (ntpOffsetsS.size() > NTP_MAX_SAMPLES)
+            ntpOffsetsS.pop_front();
+    }
+
+    if (hasRootDelay)
+    {
+        ntpDelaysS.push_back(rootDelayS);
+        if (ntpDelaysS.size() > NTP_MAX_SAMPLES)
+            ntpDelaysS.pop_front();
+    }
+
+    if (hasRootDispersion)
+    {
+        ntpRootDispersionS.push_back(rootDispersionS);
+        if (ntpRootDispersionS.size() > NTP_MAX_SAMPLES)
+            ntpRootDispersionS.pop_front();
+    }
+
+    const double meanOffsetS = std::fabs(meanValue(ntpOffsetsS));
+    const double dispersionS = sampleStdDev(ntpDelaysS);
+    const double jitterS = sampleStdDev(ntpOffsetsS);
+    const double rootDispersionMeanS = meanValue(ntpRootDispersionS);
+    const double uncertaintyS = meanOffsetS + dispersionS + jitterS;
+
+    char precisionUs[64];
+    char offsetUs[64];
+    char rootDispMs[64];
+    char dispersionMs[64];
+    char jitterMs[64];
+
+    snprintf(precisionUs, sizeof(precisionUs), "%.1f", uncertaintyS * 1e6);
+    snprintf(offsetUs, sizeof(offsetUs), "%.1f", meanOffsetS * 1e6);
+    snprintf(rootDispMs, sizeof(rootDispMs), "%.3f", rootDispersionMeanS * 1e3);
+    snprintf(dispersionMs, sizeof(dispersionMs), "%.3f", dispersionS * 1e3);
+    snprintf(jitterMs, sizeof(jitterMs), "%.3f", jitterS * 1e3);
+
+    const std::string refClock = extractClockHms(refTime);
+    NtpInfoTP[0].setText(refClock.c_str());
+    NtpInfoTP[1].setText(precisionUs);
+    NtpInfoTP[2].setText(offsetUs);
+    NtpInfoTP[3].setText(rootDispMs);
+    NtpInfoTP[4].setText(dispersionMs);
+    NtpInfoTP[5].setText(jitterMs);
+    NtpInfoTP.setState(IPS_OK);
+    NtpInfoTP.apply();
 }
 
 void AstrAlimSystem::updateTime()
