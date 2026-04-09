@@ -34,6 +34,7 @@ private:
     void updateTime();
     void updateDiskSpace();
     void updateNtpInfo();
+    bool queryNtpSample(double& txTimeUnixS, double& offsetS, double& delayS, double& rootDispersionS);
     std::string execCommand(const char* cmd);
     std::string formatDiskSpace(const std::string& device, const std::string& mountPoint, 
                                  const std::string& size, const std::string& used, const std::string& avail, 
@@ -62,6 +63,8 @@ private:
     int pollCounter = 0;
     static constexpr int POLL_INTERVAL_MS = 1000;
     static constexpr int INFO_UPDATE_CYCLES = 60;
+    static constexpr const char* NTP_SERVER = "127.0.0.1";
+    static constexpr int NTP_TIMEOUT_MS = 500;
 
     // NTP rolling samples (same spirit as Python module)
     std::deque<double> ntpOffsetsS;

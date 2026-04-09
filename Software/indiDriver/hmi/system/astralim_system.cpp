@@ -10,6 +10,7 @@
 #include <cstring>
 #include <ctime>
 #include <array>
+#include <chrono>
 #include <memory>
 #include <sstream>
 #include <vector>
@@ -17,20 +18,15 @@
 #include <cctype>
 #include <cmath>
 #include <numeric>
-#include <regex>
+#include <cstdint>
+
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 namespace
 {
-std::string trim(const std::string& value)
-{
-    const auto begin = std::find_if(value.begin(), value.end(), [](unsigned char c) { return !std::isspace(c); });
-    if (begin == value.end())
-        return "";
-
-    const auto rbegin = std::find_if(value.rbegin(), value.rend(), [](unsigned char c) { return !std::isspace(c); });
-    return std::string(begin, rbegin.base());
-}
-
 double meanValue(const std::deque<double>& samples)
 {
     if (samples.empty())
@@ -56,32 +52,47 @@ double sampleStdDev(const std::deque<double>& samples)
     return std::sqrt(sqSum / static_cast<double>(samples.size() - 1));
 }
 
-bool parseFirstDouble(const std::string& line, double& outValue)
-{
-    static const std::regex kNumberRegex(R"([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)");
-    std::smatch match;
-    if (!std::regex_search(line, match, kNumberRegex))
-        return false;
+constexpr double NTP_UNIX_EPOCH_DELTA_S = 2208988800.0;
 
-    try
-    {
-        outValue = std::stod(match.str(0));
-        return true;
-    }
-    catch (...)
-    {
-        return false;
-    }
+double nowUnixSeconds()
+{
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    return std::chrono::duration<double>(now).count();
 }
 
-std::string extractClockHms(const std::string& value)
+uint32_t readBe32(const uint8_t* data)
 {
-    static const std::regex kClockRegex(R"((\d{2}:\d{2}:\d{2}))");
-    std::smatch match;
-    if (std::regex_search(value, match, kClockRegex))
-        return match.str(1);
-    return value;
+    return (static_cast<uint32_t>(data[0]) << 24) |
+           (static_cast<uint32_t>(data[1]) << 16) |
+           (static_cast<uint32_t>(data[2]) << 8) |
+           static_cast<uint32_t>(data[3]);
 }
+
+double ntpTimestampToUnixSeconds(const uint8_t* ts)
+{
+    const uint32_t sec = readBe32(ts);
+    const uint32_t frac = readBe32(ts + 4);
+    const double fracS = static_cast<double>(frac) / 4294967296.0;
+    return static_cast<double>(sec) - NTP_UNIX_EPOCH_DELTA_S + fracS;
+}
+
+void writeUnixSecondsAsNtpTimestamp(double unixS, uint8_t* ts)
+{
+    const double ntpS = unixS + NTP_UNIX_EPOCH_DELTA_S;
+    const uint32_t sec = static_cast<uint32_t>(std::floor(ntpS));
+    const double frac = ntpS - std::floor(ntpS);
+    const uint32_t fracPart = static_cast<uint32_t>(frac * 4294967296.0);
+
+    ts[0] = static_cast<uint8_t>((sec >> 24) & 0xFF);
+    ts[1] = static_cast<uint8_t>((sec >> 16) & 0xFF);
+    ts[2] = static_cast<uint8_t>((sec >> 8) & 0xFF);
+    ts[3] = static_cast<uint8_t>(sec & 0xFF);
+    ts[4] = static_cast<uint8_t>((fracPart >> 24) & 0xFF);
+    ts[5] = static_cast<uint8_t>((fracPart >> 16) & 0xFF);
+    ts[6] = static_cast<uint8_t>((fracPart >> 8) & 0xFF);
+    ts[7] = static_cast<uint8_t>(fracPart & 0xFF);
+}
+
 } // namespace
 
 // Singleton instance
@@ -215,9 +226,12 @@ void AstrAlimSystem::TimerHit()
 
 void AstrAlimSystem::updateNtpInfo()
 {
-    // Pull all needed metrics in one call.
-    const std::string tracking = execCommand("chronyc tracking 2>/dev/null");
-    if (tracking.empty())
+    double txTimeUnixS = 0.0;
+    double offsetS = 0.0;
+    double delayS = 0.0;
+    double rootDispersionS = 0.0;
+
+    if (!queryNtpSample(txTimeUnixS, offsetS, delayS, rootDispersionS))
     {
         NtpInfoTP[0].setText("--:--:--");
         NtpInfoTP[1].setText("--");
@@ -230,75 +244,17 @@ void AstrAlimSystem::updateNtpInfo()
         return;
     }
 
-    std::string refTime = "Unknown";
-    double offsetS = 0.0;
-    double rootDelayS = 0.0;
-    double rootDispersionS = 0.0;
+    ntpOffsetsS.push_back(offsetS);
+    if (ntpOffsetsS.size() > NTP_MAX_SAMPLES)
+        ntpOffsetsS.pop_front();
 
-    bool hasOffset = false;
-    bool hasRootDelay = false;
-    bool hasRootDispersion = false;
+    ntpDelaysS.push_back(delayS);
+    if (ntpDelaysS.size() > NTP_MAX_SAMPLES)
+        ntpDelaysS.pop_front();
 
-    std::istringstream stream(tracking);
-    std::string line;
-    while (std::getline(stream, line))
-    {
-        if (line.find("Ref time (UTC)") != std::string::npos)
-        {
-            const size_t colonPos = line.find(':');
-            if (colonPos != std::string::npos)
-                refTime = trim(line.substr(colonPos + 1));
-        }
-        else if (line.find("System time") != std::string::npos)
-        {
-            double parsed = 0.0;
-            if (parseFirstDouble(line, parsed))
-            {
-                // Same spirit as Python module: uncertainty uses absolute mean offset.
-                offsetS = std::fabs(parsed);
-                hasOffset = true;
-            }
-        }
-        else if (line.find("Root delay") != std::string::npos)
-        {
-            double parsed = 0.0;
-            if (parseFirstDouble(line, parsed))
-            {
-                rootDelayS = std::fabs(parsed);
-                hasRootDelay = true;
-            }
-        }
-        else if (line.find("Root dispersion") != std::string::npos)
-        {
-            double parsed = 0.0;
-            if (parseFirstDouble(line, parsed))
-            {
-                rootDispersionS = std::fabs(parsed);
-                hasRootDispersion = true;
-            }
-        }
-    }
-
-    if (hasOffset)
-    {
-        ntpOffsetsS.push_back(offsetS);
-        if (ntpOffsetsS.size() > NTP_MAX_SAMPLES)
-            ntpOffsetsS.pop_front();
-    }
-
-    if (hasRootDelay)
-    {
-        ntpDelaysS.push_back(rootDelayS);
-        if (ntpDelaysS.size() > NTP_MAX_SAMPLES)
-            ntpDelaysS.pop_front();
-    }
-
-    if (hasRootDispersion)
-    {
-        ntpRootDispersionS.push_back(rootDispersionS);
-        if (ntpRootDispersionS.size() > NTP_MAX_SAMPLES)
-            ntpRootDispersionS.pop_front();
-    }
+    ntpRootDispersionS.push_back(rootDispersionS);
+    if (ntpRootDispersionS.size() > NTP_MAX_SAMPLES)
+        ntpRootDispersionS.pop_front();
 
     const double meanOffsetS = std::fabs(meanValue(ntpOffsetsS));
     const double dispersionS = sampleStdDev(ntpDelaysS);
@@ -318,8 +274,13 @@ void AstrAlimSystem::updateNtpInfo()
     snprintf(dispersionMs, sizeof(dispersionMs), "%.3f", dispersionS * 1e3);
     snprintf(jitterMs, sizeof(jitterMs), "%.3f", jitterS * 1e3);
 
-    const std::string refClock = extractClockHms(refTime);
-    NtpInfoTP[0].setText(refClock.c_str());
+    char hms[16];
+    const time_t txTime = static_cast<time_t>(txTimeUnixS);
+    std::tm utcTm {};
+    gmtime_r(&txTime, &utcTm);
+    strftime(hms, sizeof(hms), "%H:%M:%S", &utcTm);
+
+    NtpInfoTP[0].setText(hms);
     NtpInfoTP[1].setText(precisionUs);
     NtpInfoTP[2].setText(offsetUs);
     NtpInfoTP[3].setText(rootDispMs);
@@ -327,6 +288,63 @@ void AstrAlimSystem::updateNtpInfo()
     NtpInfoTP[5].setText(jitterMs);
     NtpInfoTP.setState(IPS_OK);
     NtpInfoTP.apply();
+}
+
+bool AstrAlimSystem::queryNtpSample(double& txTimeUnixS, double& offsetS, double& delayS, double& rootDispersionS)
+{
+    // NTP request/response packet (RFC 5905), 48 bytes.
+    uint8_t packet[48] = {0};
+    packet[0] = 0x23; // LI=0, VN=4, Mode=3 (client)
+
+    const double t1 = nowUnixSeconds();
+    writeUnixSecondsAsNtpTimestamp(t1, &packet[40]);
+
+    int sock = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0)
+        return false;
+
+    timeval timeout {};
+    timeout.tv_sec = NTP_TIMEOUT_MS / 1000;
+    timeout.tv_usec = (NTP_TIMEOUT_MS % 1000) * 1000;
+    (void) setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+    sockaddr_in addr {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(123);
+    if (inet_pton(AF_INET, NTP_SERVER, &addr.sin_addr) != 1)
+    {
+        ::close(sock);
+        return false;
+    }
+
+    const ssize_t sent = sendto(sock, packet, sizeof(packet), 0, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    if (sent != static_cast<ssize_t>(sizeof(packet)))
+    {
+        ::close(sock);
+        return false;
+    }
+
+    sockaddr_in srcAddr {};
+    socklen_t srcLen = sizeof(srcAddr);
+    const ssize_t received = recvfrom(sock, packet, sizeof(packet), 0, reinterpret_cast<sockaddr*>(&srcAddr), &srcLen);
+    const double t4 = nowUnixSeconds();
+    ::close(sock);
+
+    if (received < 48)
+        return false;
+
+    const double t2 = ntpTimestampToUnixSeconds(&packet[32]);
+    const double t3 = ntpTimestampToUnixSeconds(&packet[40]);
+
+    txTimeUnixS = t3;
+    offsetS = std::fabs(((t2 - t1) + (t3 - t4)) / 2.0);
+    delayS = std::fabs((t4 - t1) - (t3 - t2));
+
+    // Root dispersion is an unsigned 16.16 fixed-point field.
+    const uint32_t rootDispRaw = readBe32(&packet[8]);
+    rootDispersionS = static_cast<double>(rootDispRaw) / 65536.0;
+
+    return true;
 }
 
 void AstrAlimSystem::updateTime()
