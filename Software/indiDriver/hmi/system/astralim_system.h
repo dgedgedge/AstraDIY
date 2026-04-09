@@ -40,8 +40,8 @@ private:
                                  const std::string& size, const std::string& used, const std::string& avail, 
                                  const std::string& percent);
 
-    // Properties - System Time
-    INDI::PropertyText SysTimeTP {2};
+    // Properties - System Time + NTP
+    INDI::PropertyText SysTimeTP {7};
     
     // Properties - System Info
     INDI::PropertyText SysInfoTP {6};
@@ -49,9 +49,6 @@ private:
     // Properties - Disk Space (root + up to 4 USB drives)
     INDI::PropertyText DiskSpaceTP {5};
 
-    // Properties - NTP metrics (aligned with AstraGps Python calculations)
-    INDI::PropertyText NtpInfoTP {6};
-    
     // Properties - System Control
     INDI::PropertySwitch SysControlSP {2};
     enum { CTRL_REBOOT, CTRL_SHUTDOWN };

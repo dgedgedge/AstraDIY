@@ -112,10 +112,15 @@ bool AstrAlimSystem::initProperties()
 {
     INDI::DefaultDevice::initProperties();
     
-    // System Time
-    SysTimeTP[0].fill("LOCAL_TIME", "Local Time", nullptr);
-    SysTimeTP[1].fill("UTC_OFFSET", "UTC Offset", nullptr);
-    SysTimeTP.fill(getDeviceName(), "SYSTEM_TIME", "System Time", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+    // System Time + NTP
+    SysTimeTP[0].fill("LOCAL_TIME", "Date | Heure | UTC", nullptr);
+    SysTimeTP[1].fill("NTP_TIME", "HEURE NTP (UTC)", nullptr);
+    SysTimeTP[2].fill("NTP_PRECISION_US", "PRECISION (us)", nullptr);
+    SysTimeTP[3].fill("NTP_OFFSET_US", "DECALAGE (us)", nullptr);
+    SysTimeTP[4].fill("NTP_ROOT_DISP_MS", "Root Dispersion (ms)", nullptr);
+    SysTimeTP[5].fill("NTP_DISP_MS", "DISPERSION (ms)", nullptr);
+    SysTimeTP[6].fill("NTP_JITTER_MS", "JITTER (ms)", nullptr);
+    SysTimeTP.fill(getDeviceName(), "SYSTEM_TIME", "System Time + NTP", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
     
     // System Info
     SysInfoTP[0].fill("HARDWARE", "Hardware", nullptr);
@@ -134,15 +139,6 @@ bool AstrAlimSystem::initProperties()
     DiskSpaceTP[4].fill("USB4", "USB 4", nullptr);
     DiskSpaceTP.fill(getDeviceName(), "DISK_SPACE", "Espace disque", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
 
-    // NTP metrics (same values as calculated in Python GPS module)
-    NtpInfoTP[0].fill("NTP_TIME", "HEURE NTP (UTC)", nullptr);
-    NtpInfoTP[1].fill("NTP_PRECISION_US", "PRECISION (us)", nullptr);
-    NtpInfoTP[2].fill("NTP_OFFSET_US", "DECALAGE (us)", nullptr);
-    NtpInfoTP[3].fill("NTP_ROOT_DISP_MS", "Root Dispersion (ms)", nullptr);
-    NtpInfoTP[4].fill("NTP_DISP_MS", "DISPERSION (ms)", nullptr);
-    NtpInfoTP[5].fill("NTP_JITTER_MS", "JITTER (ms)", nullptr);
-    NtpInfoTP.fill(getDeviceName(), "NTP_INFO", "NTP", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
-    
     // System Control
     SysControlSP[CTRL_REBOOT].fill("REBOOT", "Reboot", ISS_OFF);
     SysControlSP[CTRL_SHUTDOWN].fill("SHUTDOWN", "Shutdown", ISS_OFF);
@@ -168,7 +164,6 @@ bool AstrAlimSystem::updateProperties()
         defineProperty(SysTimeTP);
         defineProperty(SysInfoTP);
         defineProperty(DiskSpaceTP);
-        defineProperty(NtpInfoTP);
         defineProperty(SysControlSP);
     }
     else
@@ -176,7 +171,6 @@ bool AstrAlimSystem::updateProperties()
         deleteProperty(SysTimeTP);
         deleteProperty(SysInfoTP);
         deleteProperty(DiskSpaceTP);
-        deleteProperty(NtpInfoTP);
         deleteProperty(SysControlSP);
         deleteProperty(SysConfirmSP);
     }
@@ -186,6 +180,8 @@ bool AstrAlimSystem::updateProperties()
 
 bool AstrAlimSystem::Connect()
 {
+    updateTime();
+
     // Get initial system info
     updateSystemInfo();
     updateDiskSpace();
@@ -233,14 +229,14 @@ void AstrAlimSystem::updateNtpInfo()
 
     if (!queryNtpSample(txTimeUnixS, offsetS, delayS, rootDispersionS))
     {
-        NtpInfoTP[0].setText("--:--:--");
-        NtpInfoTP[1].setText("--");
-        NtpInfoTP[2].setText("--");
-        NtpInfoTP[3].setText("--");
-        NtpInfoTP[4].setText("--");
-        NtpInfoTP[5].setText("--");
-        NtpInfoTP.setState(IPS_IDLE);
-        NtpInfoTP.apply();
+        SysTimeTP[1].setText("--:--:--");
+        SysTimeTP[2].setText("--");
+        SysTimeTP[3].setText("--");
+        SysTimeTP[4].setText("--");
+        SysTimeTP[5].setText("--");
+        SysTimeTP[6].setText("--");
+        SysTimeTP.setState(IPS_IDLE);
+        SysTimeTP.apply();
         return;
     }
 
@@ -280,14 +276,14 @@ void AstrAlimSystem::updateNtpInfo()
     gmtime_r(&txTime, &utcTm);
     strftime(hms, sizeof(hms), "%H:%M:%S", &utcTm);
 
-    NtpInfoTP[0].setText(hms);
-    NtpInfoTP[1].setText(precisionUs);
-    NtpInfoTP[2].setText(offsetUs);
-    NtpInfoTP[3].setText(rootDispMs);
-    NtpInfoTP[4].setText(dispersionMs);
-    NtpInfoTP[5].setText(jitterMs);
-    NtpInfoTP.setState(IPS_OK);
-    NtpInfoTP.apply();
+    SysTimeTP[1].setText(hms);
+    SysTimeTP[2].setText(precisionUs);
+    SysTimeTP[3].setText(offsetUs);
+    SysTimeTP[4].setText(rootDispMs);
+    SysTimeTP[5].setText(dispersionMs);
+    SysTimeTP[6].setText(jitterMs);
+    SysTimeTP.setState(IPS_OK);
+    SysTimeTP.apply();
 }
 
 bool AstrAlimSystem::queryNtpSample(double& txTimeUnixS, double& offsetS, double& delayS, double& rootDispersionS)
@@ -353,13 +349,15 @@ void AstrAlimSystem::updateTime()
     time(&rawtime);
     struct tm* local_time = localtime(&rawtime);
     
-    char timeStr[32];
-    strftime(timeStr, sizeof(timeStr), "%Y-%m-%dT%H:%M:%S", local_time);
-    SysTimeTP[0].setText(timeStr);
-    
-    char offsetStr[16];
-    snprintf(offsetStr, sizeof(offsetStr), "%+.2f", local_time->tm_gmtoff / 3600.0);
-    SysTimeTP[1].setText(offsetStr);
+    char dateStr[16];
+    char hourStr[16];
+    strftime(dateStr, sizeof(dateStr), "%Y-%m-%d", local_time);
+    strftime(hourStr, sizeof(hourStr), "%H:%M:%S", local_time);
+
+    char localTimeStr[64];
+    snprintf(localTimeStr, sizeof(localTimeStr), "%s | %s | UTC%+.2f", dateStr, hourStr,
+             local_time->tm_gmtoff / 3600.0);
+    SysTimeTP[0].setText(localTimeStr);
     
     SysTimeTP.setState(IPS_OK);
     SysTimeTP.apply();
