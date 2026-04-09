@@ -396,10 +396,19 @@ std::string AstrAlimSystem::formatDiskSpace(const std::string& device, const std
 
 std::string AstrAlimSystem::execCommand(const char* cmd)
 {
+    struct PipeCloser
+    {
+        void operator()(FILE* file) const noexcept
+        {
+            if (file != nullptr)
+                pclose(file);
+        }
+    };
+
     std::array<char, 256> buffer;
     std::string result;
-    
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+
+    std::unique_ptr<FILE, PipeCloser> pipe(popen(cmd, "r"));
     if (!pipe)
     {
         return "";
