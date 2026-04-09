@@ -112,17 +112,10 @@ bool AstrAlimSystem::initProperties()
 {
     INDI::DefaultDevice::initProperties();
     
-    // System Time + NTP
-    SysTimeTP[0].fill("LOCAL_DATE", "Date locale", nullptr);
-    SysTimeTP[1].fill("LOCAL_HOUR", "Heure locale", nullptr);
-    SysTimeTP[2].fill("UTC_OFFSET", "Decalage UTC (h)", nullptr);
-    SysTimeTP[3].fill("NTP_TIME", "HEURE NTP (UTC)", nullptr);
-    SysTimeTP[4].fill("NTP_PRECISION_US", "PRECISION (us)", nullptr);
-    SysTimeTP[5].fill("NTP_OFFSET_US", "DECALAGE (us)", nullptr);
-    SysTimeTP[6].fill("NTP_DELAY_MS", "DELAI RESEAU (ms)", nullptr);
-    SysTimeTP[7].fill("NTP_ROOT_DISP_MS", "Root Dispersion (ms)", nullptr);
-    SysTimeTP[8].fill("NTP_DISP_MS", "DISPERSION (ms)", nullptr);
-    SysTimeTP[9].fill("NTP_JITTER_MS", "JITTER (ms)", nullptr);
+    // System Time + NTP (compact rows)
+    SysTimeTP[0].fill("LOCAL_TIME", "Date | Heure | UTC", nullptr);
+    SysTimeTP[1].fill("NTP_TIME", "HEURE NTP (UTC)", nullptr);
+    SysTimeTP[2].fill("NTP_METRICS", "Precision | Decalage | Delai | Dispersion | Jitter", nullptr);
     SysTimeTP.fill(getDeviceName(), "SYSTEM_TIME", "System Time + NTP", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
     
     // System Info
@@ -232,13 +225,8 @@ void AstrAlimSystem::updateNtpInfo()
 
     if (!queryNtpSample(txTimeUnixS, offsetS, delayS, rootDispersionS))
     {
-        SysTimeTP[3].setText("--:--:--");
-        SysTimeTP[4].setText("--");
-        SysTimeTP[5].setText("--");
-        SysTimeTP[6].setText("--");
-        SysTimeTP[7].setText("--");
-        SysTimeTP[8].setText("--");
-        SysTimeTP[9].setText("--");
+        SysTimeTP[1].setText("--:--:--");
+        SysTimeTP[2].setText("Prec -- us | Off -- us | Del -- ms | Root -- ms | Disp -- ms | Jit -- ms");
         SysTimeTP.setState(IPS_IDLE);
         SysTimeTP.apply();
         return;
@@ -263,19 +251,15 @@ void AstrAlimSystem::updateNtpInfo()
     const double rootDispersionMeanS = meanValue(ntpRootDispersionS);
     const double uncertaintyS = meanOffsetS + dispersionS + jitterS;
 
-    char precisionUs[64];
-    char offsetUs[64];
-    char delayMs[64];
-    char rootDispMs[64];
-    char dispersionMs[64];
-    char jitterMs[64];
-
-    snprintf(precisionUs, sizeof(precisionUs), "%.1f", uncertaintyS * 1e6);
-    snprintf(offsetUs, sizeof(offsetUs), "%.1f", meanOffsetS * 1e6);
-    snprintf(delayMs, sizeof(delayMs), "%.3f", delayMeanS * 1e3);
-    snprintf(rootDispMs, sizeof(rootDispMs), "%.3f", rootDispersionMeanS * 1e3);
-    snprintf(dispersionMs, sizeof(dispersionMs), "%.3f", dispersionS * 1e3);
-    snprintf(jitterMs, sizeof(jitterMs), "%.3f", jitterS * 1e3);
+    char metrics[192];
+    snprintf(metrics, sizeof(metrics),
+             "Prec %.1f us | Off %.1f us | Del %.3f ms | Root %.3f ms | Disp %.3f ms | Jit %.3f ms",
+             uncertaintyS * 1e6,
+             meanOffsetS * 1e6,
+             delayMeanS * 1e3,
+             rootDispersionMeanS * 1e3,
+             dispersionS * 1e3,
+             jitterS * 1e3);
 
     char hms[16];
     const time_t txTime = static_cast<time_t>(txTimeUnixS);
@@ -283,13 +267,8 @@ void AstrAlimSystem::updateNtpInfo()
     gmtime_r(&txTime, &utcTm);
     strftime(hms, sizeof(hms), "%H:%M:%S", &utcTm);
 
-    SysTimeTP[3].setText(hms);
-    SysTimeTP[4].setText(precisionUs);
-    SysTimeTP[5].setText(offsetUs);
-    SysTimeTP[6].setText(delayMs);
-    SysTimeTP[7].setText(rootDispMs);
-    SysTimeTP[8].setText(dispersionMs);
-    SysTimeTP[9].setText(jitterMs);
+    SysTimeTP[1].setText(hms);
+    SysTimeTP[2].setText(metrics);
     SysTimeTP.setState(IPS_OK);
     SysTimeTP.apply();
 }
@@ -360,13 +339,13 @@ void AstrAlimSystem::updateTime()
     char dateStr[16];
     char hourStr[16];
     char offsetStr[16];
+    char localTimeStr[64];
     strftime(dateStr, sizeof(dateStr), "%Y-%m-%d", local_time);
     strftime(hourStr, sizeof(hourStr), "%H:%M:%S", local_time);
     snprintf(offsetStr, sizeof(offsetStr), "%+.2f", local_time->tm_gmtoff / 3600.0);
 
-    SysTimeTP[0].setText(dateStr);
-    SysTimeTP[1].setText(hourStr);
-    SysTimeTP[2].setText(offsetStr);
+    snprintf(localTimeStr, sizeof(localTimeStr), "%s | %s | UTC%s", dateStr, hourStr, offsetStr);
+    SysTimeTP[0].setText(localTimeStr);
     
     SysTimeTP.setState(IPS_OK);
     SysTimeTP.apply();

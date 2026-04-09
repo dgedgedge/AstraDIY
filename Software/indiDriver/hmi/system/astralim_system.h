@@ -40,8 +40,8 @@ private:
                                  const std::string& size, const std::string& used, const std::string& avail, 
                                  const std::string& percent);
 
-    // Properties - System Time + NTP
-    INDI::PropertyText SysTimeTP {10};
+    // Properties - System Time + NTP (compact display)
+    INDI::PropertyText SysTimeTP {3};
     
     // Properties - System Info
     INDI::PropertyText SysInfoTP {6};
