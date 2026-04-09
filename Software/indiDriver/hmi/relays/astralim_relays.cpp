@@ -35,11 +35,11 @@ bool AstrAlimRelays::initProperties()
 {
     INDI::DefaultDevice::initProperties();
     
-    // BCM Pins configuration
+    // BCM Pins information (read-only)
     BCMPinsNP[0].fill("BCMPIN_DC1", "DC1", "%0.0f", 1, 27, 0, AstrAlim::RelayPins::DC1);
     BCMPinsNP[1].fill("BCMPIN_DC2", "DC2", "%0.0f", 1, 27, 0, AstrAlim::RelayPins::DC2);
     BCMPinsNP[2].fill("BCMPIN_DC3", "DC3", "%0.0f", 1, 27, 0, AstrAlim::RelayPins::DC3);
-    BCMPinsNP.fill(getDeviceName(), "BCMPINS", "BCM Pins", OPTIONS_TAB, IP_RW, 60, IPS_IDLE);
+    BCMPinsNP.fill(getDeviceName(), "BCMPINS", "BCM Pins", OPTIONS_TAB, IP_RO, 60, IPS_IDLE);
     
     // Active state selector (default: Active High for DIY boards)
     ActiveStateSP[STATE_LOW].fill("ACTIVE_LOW", "Active Low", ISS_OFF);
@@ -88,8 +88,8 @@ bool AstrAlimRelays::initProperties()
     defineProperty(BCMPinsNP);
     defineProperty(ActiveStateSP);
     
-    // Load saved configuration
-    loadConfig();
+    // Load only configurable settings.
+    loadConfig(true, "ACTIVE_STATE");
     
     // Update active state from loaded config
     activeState = (ActiveStateSP[STATE_HIGH].getState() == ISS_ON) ? 1 : 0;
@@ -192,9 +192,7 @@ bool AstrAlimRelays::Connect()
         }
     }
     
-    // Lock settings while connected
-    BCMPinsNP.setState(IPS_BUSY);
-    BCMPinsNP.apply();
+    // Lock configurable settings while connected
     ActiveStateSP.setState(IPS_BUSY);
     ActiveStateSP.apply();
     
@@ -212,9 +210,7 @@ bool AstrAlimRelays::Disconnect()
 {
     gpio->closeChip();
     
-    // Unlock settings
-    BCMPinsNP.setState(IPS_IDLE);
-    BCMPinsNP.apply();
+    // Unlock configurable settings
     ActiveStateSP.setState(IPS_IDLE);
     ActiveStateSP.apply();
     
@@ -368,51 +364,12 @@ bool AstrAlimRelays::setRelay(int relay, bool on)
 
 bool AstrAlimRelays::ISNewNumber(const char* dev, const char* name, double values[], char* names[], int n)
 {
-    if (dev && strcmp(dev, getDeviceName()) == 0)
-    {
-        // BCM Pins
-        if (BCMPinsNP.isNameMatch(name))
-        {
-            if (isConnected())
-            {
-                LOG_WARN("Cannot change BCM pins while connected");
-                return false;
-            }
-            
-            // Validate pins
-            for (int i = 0; i < n; i++)
-            {
-                if (values[i] < 1 || values[i] > 27)
-                {
-                    LOGF_ERROR("Invalid BCM pin: %.0f", values[i]);
-                    BCMPinsNP.setState(IPS_ALERT);
-                    BCMPinsNP.apply();
-                    return false;
-                }
-                
-                // Check for duplicates
-                for (int j = i + 1; j < n; j++)
-                {
-                    if (values[i] == values[j])
-                    {
-                        LOG_ERROR("Duplicate BCM pin assignment");
-                        BCMPinsNP.setState(IPS_ALERT);
-                        BCMPinsNP.apply();
-                        return false;
-                    }
-                }
-            }
-            
-            BCMPinsNP.update(values, names, n);
-            BCMPinsNP.setState(IPS_OK);
-            BCMPinsNP.apply();
-            
-            LOGF_INFO("BCM Pins set to DC1: %.0f, DC2: %.0f, DC3: %.0f",
-                      BCMPinsNP[0].getValue(), BCMPinsNP[1].getValue(), BCMPinsNP[2].getValue());
-            return true;
-        }
-    }
-    
+    (void)dev;
+    (void)name;
+    (void)values;
+    (void)names;
+    (void)n;
+
     return INDI::DefaultDevice::ISNewNumber(dev, name, values, names, n);
 }
 
@@ -506,7 +463,6 @@ bool AstrAlimRelays::saveConfigItems(FILE* fp)
 {
     INDI::DefaultDevice::saveConfigItems(fp);
     
-    BCMPinsNP.save(fp);
     ActiveStateSP.save(fp);
     Relay1SP.save(fp);
     Relay2SP.save(fp);

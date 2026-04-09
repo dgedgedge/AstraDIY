@@ -54,7 +54,7 @@ private:
     INDI::PropertySwitch Relay3SP {2};
     enum { RELAY_ON, RELAY_OFF };
     
-    // Properties - BCM Pins (configurable)
+    // Properties - BCM Pins (read-only information)
     INDI::PropertyNumber BCMPinsNP {3};
     
     // Properties - Power monitoring (INA219)
