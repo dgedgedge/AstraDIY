@@ -41,7 +41,7 @@ private:
                                  const std::string& percent);
 
     // Properties - System Time + NTP (compact display)
-    INDI::PropertyText SysTimeTP {3};
+    INDI::PropertyText SysTimeTP {5};
     
     // Properties - System Info
     INDI::PropertyText SysInfoTP {6};

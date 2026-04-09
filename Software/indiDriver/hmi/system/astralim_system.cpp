@@ -115,7 +115,9 @@ bool AstrAlimSystem::initProperties()
     // System Time + NTP (compact rows)
     SysTimeTP[0].fill("LOCAL_TIME", "Date | Heure | UTC", nullptr);
     SysTimeTP[1].fill("NTP_TIME", "HEURE NTP (UTC)", nullptr);
-    SysTimeTP[2].fill("NTP_METRICS", "Precision | Decalage | Delai | Dispersion | Jitter", nullptr);
+    SysTimeTP[2].fill("NTP_METRICS_A", "Precision | Decalage", nullptr);
+    SysTimeTP[3].fill("NTP_METRICS_B", "Delai | Root Dispersion", nullptr);
+    SysTimeTP[4].fill("NTP_METRICS_C", "Dispersion | Jitter", nullptr);
     SysTimeTP.fill(getDeviceName(), "SYSTEM_TIME", "System Time + NTP", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
     
     // System Info
@@ -226,7 +228,9 @@ void AstrAlimSystem::updateNtpInfo()
     if (!queryNtpSample(txTimeUnixS, offsetS, delayS, rootDispersionS))
     {
         SysTimeTP[1].setText("--:--:--");
-        SysTimeTP[2].setText("Prec -- us | Off -- us | Del -- ms | Root -- ms | Disp -- ms | Jit -- ms");
+        SysTimeTP[2].setText("Prec -- us | Off -- us");
+        SysTimeTP[3].setText("Del -- ms | Root -- ms");
+        SysTimeTP[4].setText("Disp -- ms | Jit -- ms");
         SysTimeTP.setState(IPS_IDLE);
         SysTimeTP.apply();
         return;
@@ -251,15 +255,15 @@ void AstrAlimSystem::updateNtpInfo()
     const double rootDispersionMeanS = meanValue(ntpRootDispersionS);
     const double uncertaintyS = meanOffsetS + dispersionS + jitterS;
 
-    char metrics[192];
-    snprintf(metrics, sizeof(metrics),
-             "Prec %.1f us | Off %.1f us | Del %.3f ms | Root %.3f ms | Disp %.3f ms | Jit %.3f ms",
-             uncertaintyS * 1e6,
-             meanOffsetS * 1e6,
-             delayMeanS * 1e3,
-             rootDispersionMeanS * 1e3,
-             dispersionS * 1e3,
-             jitterS * 1e3);
+    char metricsA[96];
+    char metricsB[96];
+    char metricsC[96];
+    snprintf(metricsA, sizeof(metricsA), "Prec %.1f us | Off %.1f us",
+             uncertaintyS * 1e6, meanOffsetS * 1e6);
+    snprintf(metricsB, sizeof(metricsB), "Del %.3f ms | Root %.3f ms",
+             delayMeanS * 1e3, rootDispersionMeanS * 1e3);
+    snprintf(metricsC, sizeof(metricsC), "Disp %.3f ms | Jit %.3f ms",
+             dispersionS * 1e3, jitterS * 1e3);
 
     char hms[16];
     const time_t txTime = static_cast<time_t>(txTimeUnixS);
@@ -268,7 +272,9 @@ void AstrAlimSystem::updateNtpInfo()
     strftime(hms, sizeof(hms), "%H:%M:%S", &utcTm);
 
     SysTimeTP[1].setText(hms);
-    SysTimeTP[2].setText(metrics);
+    SysTimeTP[2].setText(metricsA);
+    SysTimeTP[3].setText(metricsB);
+    SysTimeTP[4].setText(metricsC);
     SysTimeTP.setState(IPS_OK);
     SysTimeTP.apply();
 }
