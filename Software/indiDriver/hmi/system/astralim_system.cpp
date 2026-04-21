@@ -27,6 +27,11 @@
 
 namespace
 {
+constexpr const char* SYSTEM_TIME_TAB = "Time & NTP";
+constexpr const char* SYSTEM_INFO_TAB = "System Info";
+constexpr const char* SYSTEM_STORAGE_TAB = "Storage";
+constexpr const char* SYSTEM_ACTIONS_TAB = "Actions";
+
 double meanValue(const std::deque<double>& samples)
 {
     if (samples.empty())
@@ -93,6 +98,25 @@ void writeUnixSecondsAsNtpTimestamp(double unixS, uint8_t* ts)
     ts[7] = static_cast<uint8_t>(fracPart & 0xFF);
 }
 
+std::string decodeRefSource(const uint8_t* refIdBytes, int stratum)
+{
+    if (stratum <= 1)
+    {
+        char code[5] = {};
+        for (int i = 0; i < 4; ++i)
+            code[i] = std::isprint(refIdBytes[i]) ? static_cast<char>(refIdBytes[i]) : '.';
+        return std::string(code);
+    }
+
+    char ip[16] = {};
+    snprintf(ip, sizeof(ip), "%u.%u.%u.%u",
+             static_cast<unsigned int>(refIdBytes[0]),
+             static_cast<unsigned int>(refIdBytes[1]),
+             static_cast<unsigned int>(refIdBytes[2]),
+             static_cast<unsigned int>(refIdBytes[3]));
+    return std::string(ip);
+}
+
 } // namespace
 
 // Singleton instance
@@ -112,13 +136,21 @@ bool AstrAlimSystem::initProperties()
 {
     INDI::DefaultDevice::initProperties();
     
-    // System Time + NTP (compact rows)
+    // System Time
     SysTimeTP[0].fill("LOCAL_TIME", "Date | Heure | UTC", nullptr);
-    SysTimeTP[1].fill("NTP_TIME", "HEURE NTP (UTC)", nullptr);
-    SysTimeTP[2].fill("NTP_METRICS_A", "Precision | Decalage", nullptr);
-    SysTimeTP[3].fill("NTP_METRICS_B", "Delai | Root Dispersion", nullptr);
-    SysTimeTP[4].fill("NTP_METRICS_C", "Dispersion | Jitter", nullptr);
-    SysTimeTP.fill(getDeviceName(), "SYSTEM_TIME", "System Time + NTP", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+    SysTimeTP.fill(getDeviceName(), "SYSTEM_TIME", "System Time", SYSTEM_TIME_TAB, IP_RO, 60, IPS_IDLE);
+
+    // NTP metrics
+    NtpInfoTP[0].fill("NTP_TIME", "Heure NTP (UTC)", nullptr);
+    NtpInfoTP[1].fill("NTP_STRATUM", "Stratum", nullptr);
+    NtpInfoTP[2].fill("NTP_REF_SOURCE", "Ref Source", nullptr);
+    NtpInfoTP[3].fill("NTP_PRECISION_US", "Precision (us)", nullptr);
+    NtpInfoTP[4].fill("NTP_OFFSET_US", "Decalage (us)", nullptr);
+    NtpInfoTP[5].fill("NTP_DELAY_MS", "Delai (ms)", nullptr);
+    NtpInfoTP[6].fill("NTP_ROOT_DISPERSION_MS", "Root Dispersion (ms)", nullptr);
+    NtpInfoTP[7].fill("NTP_DISPERSION_MS", "Dispersion (ms)", nullptr);
+    NtpInfoTP[8].fill("NTP_JITTER_MS", "Jitter (ms)", nullptr);
+    NtpInfoTP.fill(getDeviceName(), "NTP_INFO", "NTP", SYSTEM_TIME_TAB, IP_RO, 60, IPS_IDLE);
     
     // System Info
     SysInfoTP[0].fill("HARDWARE", "Hardware", nullptr);
@@ -127,7 +159,7 @@ bool AstrAlimSystem::initProperties()
     SysInfoTP[3].fill("LOAD", "Load (1/5/15 min)", nullptr);
     SysInfoTP[4].fill("HOSTNAME", "Hostname", nullptr);
     SysInfoTP[5].fill("LOCAL_IP", "Local IP", nullptr);
-    SysInfoTP.fill(getDeviceName(), "SYSTEM_INFO", "System Info", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+    SysInfoTP.fill(getDeviceName(), "SYSTEM_INFO", "System Info", SYSTEM_INFO_TAB, IP_RO, 60, IPS_IDLE);
     
     // Disk Space (root + USB drives)
     DiskSpaceTP[0].fill("ROOT_DISK", "Disque système", nullptr);
@@ -135,17 +167,17 @@ bool AstrAlimSystem::initProperties()
     DiskSpaceTP[2].fill("USB2", "USB 2", nullptr);
     DiskSpaceTP[3].fill("USB3", "USB 3", nullptr);
     DiskSpaceTP[4].fill("USB4", "USB 4", nullptr);
-    DiskSpaceTP.fill(getDeviceName(), "DISK_SPACE", "Espace disque", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+    DiskSpaceTP.fill(getDeviceName(), "DISK_SPACE", "Espace disque", SYSTEM_STORAGE_TAB, IP_RO, 60, IPS_IDLE);
 
     // System Control
     SysControlSP[CTRL_REBOOT].fill("REBOOT", "Reboot", ISS_OFF);
     SysControlSP[CTRL_SHUTDOWN].fill("SHUTDOWN", "Shutdown", ISS_OFF);
-    SysControlSP.fill(getDeviceName(), "SYSTEM_CONTROL", "System Control", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+    SysControlSP.fill(getDeviceName(), "SYSTEM_CONTROL", "System Control", SYSTEM_ACTIONS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
     
     // Confirmation dialog
     SysConfirmSP[CONFIRM_YES].fill("CONFIRM_YES", "Yes", ISS_OFF);
     SysConfirmSP[CONFIRM_NO].fill("CONFIRM_NO", "No", ISS_OFF);
-    SysConfirmSP.fill(getDeviceName(), "CONFIRM_ACTION", "Confirm?", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+    SysConfirmSP.fill(getDeviceName(), "CONFIRM_ACTION", "Confirm?", SYSTEM_ACTIONS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
     
     addDebugControl();
     setDefaultPollingPeriod(POLL_INTERVAL_MS);
@@ -160,6 +192,7 @@ bool AstrAlimSystem::updateProperties()
     if (isConnected())
     {
         defineProperty(SysTimeTP);
+        defineProperty(NtpInfoTP);
         defineProperty(SysInfoTP);
         defineProperty(DiskSpaceTP);
         defineProperty(SysControlSP);
@@ -167,6 +200,7 @@ bool AstrAlimSystem::updateProperties()
     else
     {
         deleteProperty(SysTimeTP);
+        deleteProperty(NtpInfoTP);
         deleteProperty(SysInfoTP);
         deleteProperty(DiskSpaceTP);
         deleteProperty(SysControlSP);
@@ -224,15 +258,60 @@ void AstrAlimSystem::updateNtpInfo()
     double offsetS = 0.0;
     double delayS = 0.0;
     double rootDispersionS = 0.0;
+    int stratum = 0;
+    std::string refSource;
 
-    if (!queryNtpSample(txTimeUnixS, offsetS, delayS, rootDispersionS))
+    if (!queryNtpSample(txTimeUnixS, offsetS, delayS, rootDispersionS, stratum, refSource))
     {
-        SysTimeTP[1].setText("--:--:--");
-        SysTimeTP[2].setText("Prec -- us | Off -- us");
-        SysTimeTP[3].setText("Del -- ms | Root -- ms");
-        SysTimeTP[4].setText("Disp -- ms | Jit -- ms");
-        SysTimeTP.setState(IPS_IDLE);
-        SysTimeTP.apply();
+        NtpInfoTP[0].setText("--:--:--");
+        NtpInfoTP[1].setText("--");
+        NtpInfoTP[2].setText("--");
+        NtpInfoTP[3].setText("--");
+        NtpInfoTP[4].setText("--");
+        NtpInfoTP[5].setText("--");
+        NtpInfoTP[6].setText("--");
+        NtpInfoTP[7].setText("--");
+        NtpInfoTP[8].setText("--");
+        NtpInfoTP.setState(IPS_IDLE);
+        NtpInfoTP.apply();
+        return;
+    }
+
+    // Stratum 0 = KoD (non synchronisé), stratum >= 16 = horloge invalide
+    const bool synchronized = (stratum >= 1 && stratum < 16);
+
+    char stratumStr[32];
+    if (stratum == 0)
+        snprintf(stratumStr, sizeof(stratumStr), "0 (non sync.)");
+    else if (stratum >= 16)
+        snprintf(stratumStr, sizeof(stratumStr), "%d (invalide)", stratum);
+    else
+        snprintf(stratumStr, sizeof(stratumStr), "%d", stratum);
+
+    char hms[16];
+    const time_t txTime = static_cast<time_t>(txTimeUnixS);
+    std::tm utcTm {};
+    gmtime_r(&txTime, &utcTm);
+    strftime(hms, sizeof(hms), "%H:%M:%S", &utcTm);
+
+    if (!synchronized)
+    {
+        // Vider les échantillons accumulés pour éviter des valeurs périmées
+        ntpOffsetsS.clear();
+        ntpDelaysS.clear();
+        ntpRootDispersionS.clear();
+
+        NtpInfoTP[0].setText(hms);
+        NtpInfoTP[1].setText(stratumStr);
+        NtpInfoTP[2].setText(refSource.c_str());
+        NtpInfoTP[3].setText("N/A");
+        NtpInfoTP[4].setText("N/A");
+        NtpInfoTP[5].setText("N/A");
+        NtpInfoTP[6].setText("N/A");
+        NtpInfoTP[7].setText("N/A");
+        NtpInfoTP[8].setText("N/A");
+        NtpInfoTP.setState(IPS_ALERT);
+        NtpInfoTP.apply();
         return;
     }
 
@@ -255,31 +334,34 @@ void AstrAlimSystem::updateNtpInfo()
     const double rootDispersionMeanS = meanValue(ntpRootDispersionS);
     const double uncertaintyS = meanOffsetS + dispersionS + jitterS;
 
-    char metricsA[96];
-    char metricsB[96];
-    char metricsC[96];
-    snprintf(metricsA, sizeof(metricsA), "Prec %.1f us | Off %.1f us",
-             uncertaintyS * 1e6, meanOffsetS * 1e6);
-    snprintf(metricsB, sizeof(metricsB), "Del %.3f ms | Root %.3f ms",
-             delayMeanS * 1e3, rootDispersionMeanS * 1e3);
-    snprintf(metricsC, sizeof(metricsC), "Disp %.3f ms | Jit %.3f ms",
-             dispersionS * 1e3, jitterS * 1e3);
+    char precisionUsStr[32];
+    char offsetUsStr[32];
+    char delayMsStr[32];
+    char rootDispMsStr[32];
+    char dispersionMsStr[32];
+    char jitterMsStr[32];
+    snprintf(precisionUsStr, sizeof(precisionUsStr), "%.1f", uncertaintyS * 1e6);
+    snprintf(offsetUsStr, sizeof(offsetUsStr), "%.1f", meanOffsetS * 1e6);
+    snprintf(delayMsStr, sizeof(delayMsStr), "%.3f", delayMeanS * 1e3);
+    snprintf(rootDispMsStr, sizeof(rootDispMsStr), "%.3f", rootDispersionMeanS * 1e3);
+    snprintf(dispersionMsStr, sizeof(dispersionMsStr), "%.3f", dispersionS * 1e3);
+    snprintf(jitterMsStr, sizeof(jitterMsStr), "%.3f", jitterS * 1e3);
 
-    char hms[16];
-    const time_t txTime = static_cast<time_t>(txTimeUnixS);
-    std::tm utcTm {};
-    gmtime_r(&txTime, &utcTm);
-    strftime(hms, sizeof(hms), "%H:%M:%S", &utcTm);
-
-    SysTimeTP[1].setText(hms);
-    SysTimeTP[2].setText(metricsA);
-    SysTimeTP[3].setText(metricsB);
-    SysTimeTP[4].setText(metricsC);
-    SysTimeTP.setState(IPS_OK);
-    SysTimeTP.apply();
+    NtpInfoTP[0].setText(hms);
+    NtpInfoTP[1].setText(stratumStr);
+    NtpInfoTP[2].setText(refSource.c_str());
+    NtpInfoTP[3].setText(precisionUsStr);
+    NtpInfoTP[4].setText(offsetUsStr);
+    NtpInfoTP[5].setText(delayMsStr);
+    NtpInfoTP[6].setText(rootDispMsStr);
+    NtpInfoTP[7].setText(dispersionMsStr);
+    NtpInfoTP[8].setText(jitterMsStr);
+    NtpInfoTP.setState(IPS_OK);
+    NtpInfoTP.apply();
 }
 
-bool AstrAlimSystem::queryNtpSample(double& txTimeUnixS, double& offsetS, double& delayS, double& rootDispersionS)
+bool AstrAlimSystem::queryNtpSample(double& txTimeUnixS, double& offsetS, double& delayS, double& rootDispersionS,
+                                    int& stratum, std::string& refSource)
 {
     // NTP request/response packet (RFC 5905), 48 bytes.
     uint8_t packet[48] = {0};
@@ -332,6 +414,9 @@ bool AstrAlimSystem::queryNtpSample(double& txTimeUnixS, double& offsetS, double
     // Root dispersion is an unsigned 16.16 fixed-point field.
     const uint32_t rootDispRaw = readBe32(&packet[8]);
     rootDispersionS = static_cast<double>(rootDispRaw) / 65536.0;
+
+    stratum = static_cast<int>(packet[1]);
+    refSource = decodeRefSource(&packet[12], stratum);
 
     return true;
 }

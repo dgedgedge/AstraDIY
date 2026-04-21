@@ -34,14 +34,18 @@ private:
     void updateTime();
     void updateDiskSpace();
     void updateNtpInfo();
-    bool queryNtpSample(double& txTimeUnixS, double& offsetS, double& delayS, double& rootDispersionS);
+    bool queryNtpSample(double& txTimeUnixS, double& offsetS, double& delayS, double& rootDispersionS,
+                        int& stratum, std::string& refSource);
     std::string execCommand(const char* cmd);
     std::string formatDiskSpace(const std::string& device, const std::string& mountPoint, 
                                  const std::string& size, const std::string& used, const std::string& avail, 
                                  const std::string& percent);
 
-    // Properties - System Time + NTP (compact display)
-    INDI::PropertyText SysTimeTP {5};
+    // Properties - System Time
+    INDI::PropertyText SysTimeTP {1};
+
+    // Properties - NTP metrics (one measure per field)
+    INDI::PropertyText NtpInfoTP {9};
     
     // Properties - System Info
     INDI::PropertyText SysInfoTP {6};
