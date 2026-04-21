@@ -260,6 +260,13 @@ void AstraComFetcher::addActor(AstraComActor& actor)
     notifyCycleConfigurationChanged();
 }
 
+void AstraComFetcher::removeActor(AstraComActor& actor)
+{
+    hasSharedUpdate.store(true);
+    std::lock_guard<std::mutex> lock(actorsLock);
+    actors.erase(std::remove(actors.begin(), actors.end(), &actor), actors.end());
+}
+
 AstraCycleTimer& AstraComFetcher::getCycleTimer()
 {
     return cycleTimer;

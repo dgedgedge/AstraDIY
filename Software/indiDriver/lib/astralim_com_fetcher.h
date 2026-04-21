@@ -54,6 +54,7 @@ public:
 
     void addDevice(AstraComDevice& device, bool eachStep = false);
     void addActor(AstraComActor& actor);
+    void removeActor(AstraComActor& actor);
 
     AstraCycleTimer& getCycleTimer();
 

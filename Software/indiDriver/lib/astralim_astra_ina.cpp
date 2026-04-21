@@ -105,25 +105,6 @@ bool AstraIna::getPingOK() const
     return pingOk;
 }
 
-bool AstraIna::readSample(double integrationDurationS, double& outVoltageV, double& outCurrentA, double& outPowerW)
-{
-    startMeasurement(0, integrationDurationS);
-    getMeasurement(0, integrationDurationS);
-
-    if (!getPingOK())
-    {
-        outVoltageV = 0.0;
-        outCurrentA = 0.0;
-        outPowerW = 0.0;
-        return false;
-    }
-
-    outVoltageV = std::max(0.0, voltageV());
-    outCurrentA = std::max(0.0, std::fabs(currentA()));
-    outPowerW = std::max(0.0, powerW());
-    return true;
-}
-
 void AstraIna::getMeasurement(int step, double integrationDurationS)
 {
     if (!configurationSent || !ina)

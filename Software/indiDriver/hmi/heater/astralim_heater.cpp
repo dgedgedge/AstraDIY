@@ -6,7 +6,9 @@
 #include "astralim_heater.h"
 #include "astralim_gpio.h"
 #include "astralim_astra_ina.h"
-#include "astralim_bme280.h"
+#include "astralim_bme_fetcher.h"
+#include "astralim_step_pwm_actor.h"
+#include "astralim_com_fetcher.h"
 #include "config.h"
 
 #include <cstring>
@@ -22,6 +24,13 @@
 #include <algorithm>
 #include <chrono>
 #include <set>
+
+namespace
+{
+constexpr const char* RELAYS_TAB = "Relays";
+constexpr const char* DEW_POINT_TAB = "Dew Point";
+constexpr const char* ENERGY_MONITOR_TAB = "Energy Monitor";
+}
 
 // Singleton instance
 static std::unique_ptr<AstrAlimHeater> heaterInstance(new AstrAlimHeater());
@@ -43,15 +52,8 @@ AstrAlimHeater::AstrAlimHeater()
             sensorAssignState[i].testStartTemp[j] = TEMP_UNAVAILABLE;
         }
     }
-    
-    // Initialiser les filtres
-    filteredDewPoint = DEWPOINT_UNAVAILABLE;
-    filteredTemp = 0.0;
-    filteredHumidity = 0.0;
-    dewPointHistory.clear();
-    tempHistory.clear();
-    humidityHistory.clear();
 }
+
 
 AstrAlimHeater::~AstrAlimHeater()
 {
@@ -79,11 +81,11 @@ bool AstrAlimHeater::initProperties()
     AmbientNP[AMB_HUMIDITY].fill("AMBIENT_HUMIDITY", "Humidity (%)", "%.1f", 0, 100, 0.1, 0);
     AmbientNP[AMB_PRESSURE].fill("AMBIENT_PRESSURE", "Pressure (hPa)", "%.1f", 300, 1100, 0.1, 0);
     AmbientNP[AMB_DEWPOINT].fill("DEW_POINT", "Dew Point (°C)", "%.1f", -40, 85, 0.1, DEWPOINT_UNAVAILABLE);
-    AmbientNP.fill(getDeviceName(), "AMBIENT_SENSOR", "Ambient", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+    AmbientNP.fill(getDeviceName(), "AMBIENT_SENSOR", "Ambient", DEW_POINT_TAB, IP_RO, 60, IPS_IDLE);
     
     // Manual humidity (for BMP280)
     ManualHumidityNP[0].fill("MANUAL_HUMIDITY", "Humidity (%)", "%.0f", 0, 100, 5, 50);
-    ManualHumidityNP.fill(getDeviceName(), "MANUAL_HUMIDITY", "Manual Humidity", OPTIONS_TAB, IP_RW, 60, IPS_IDLE);
+    ManualHumidityNP.fill(getDeviceName(), "MANUAL_HUMIDITY", "Manual Humidity", DEW_POINT_TAB, IP_RW, 60, IPS_IDLE);
     
     // ===== Heater 1 =====
     // Initialiser à 0 au lieu de TEMP_UNAVAILABLE pour éviter d'afficher 100°C au démarrage
@@ -98,8 +100,9 @@ bool AstrAlimHeater::initProperties()
     Heater1SetpointNP.fill(getDeviceName(), "HEATER1_SETPOINT", "Heater 1 Target", MAIN_CONTROL_TAB, IP_RW, 60, IPS_IDLE);
     
     Heater1ModeSP[MODE_OFF].fill("HEATER1_OFF", "Off", ISS_ON);
-    Heater1ModeSP[MODE_MANUAL].fill("HEATER1_MANUAL", "Manual", ISS_OFF);
-    Heater1ModeSP[MODE_AUTO].fill("HEATER1_AUTO", "Auto (Dew)", ISS_OFF);
+    Heater1ModeSP[MODE_POWER].fill("HEATER1_POWER_MODE", "Power", ISS_OFF);
+    Heater1ModeSP[MODE_SETPOINT].fill("HEATER1_SETPOINT_MODE", "Setpoint", ISS_OFF);
+    Heater1ModeSP[MODE_AUTO_DEW].fill("HEATER1_AUTO_DEW", "Auto Dew", ISS_OFF);
     Heater1ModeSP.fill(getDeviceName(), "HEATER1_MODE", "Heater 1 Mode", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
     
     Heater1SensorTP[0].fill("HEATER1_SENSOR_ID", "Sensor ID", "");
@@ -123,8 +126,9 @@ bool AstrAlimHeater::initProperties()
     Heater2SetpointNP.fill(getDeviceName(), "HEATER2_SETPOINT", "Heater 2 Target", MAIN_CONTROL_TAB, IP_RW, 60, IPS_IDLE);
     
     Heater2ModeSP[MODE_OFF].fill("HEATER2_OFF", "Off", ISS_ON);
-    Heater2ModeSP[MODE_MANUAL].fill("HEATER2_MANUAL", "Manual", ISS_OFF);
-    Heater2ModeSP[MODE_AUTO].fill("HEATER2_AUTO", "Auto (Dew)", ISS_OFF);
+    Heater2ModeSP[MODE_POWER].fill("HEATER2_POWER_MODE", "Power", ISS_OFF);
+    Heater2ModeSP[MODE_SETPOINT].fill("HEATER2_SETPOINT_MODE", "Setpoint", ISS_OFF);
+    Heater2ModeSP[MODE_AUTO_DEW].fill("HEATER2_AUTO_DEW", "Auto Dew", ISS_OFF);
     Heater2ModeSP.fill(getDeviceName(), "HEATER2_MODE", "Heater 2 Mode", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
     
     Heater2SensorTP[0].fill("HEATER2_SENSOR_ID", "Sensor ID", "");
@@ -152,14 +156,59 @@ bool AstrAlimHeater::initProperties()
     
     // ===== Dew Delta =====
     DewDeltaNP[0].fill("DEW_DELTA", "Delta (°C)", "%.1f", 0, 20, 0.5, DEFAULT_DEW_DELTA);
-    DewDeltaNP.fill(getDeviceName(), "DEW_DELTA", "Dew Point Delta", OPTIONS_TAB, IP_RW, 60, IPS_IDLE);
+    DewDeltaNP.fill(getDeviceName(), "DEW_DELTA", "Dew Point Delta", DEW_POINT_TAB, IP_RW, 60, IPS_IDLE);
     
-    // ===== Power Monitoring =====
-    PowerMonitorNP[PWR_VOLTAGE1].fill("VOLTAGE1", "Heater 1 (V)", "%.2f", 0, 15, 0, 0);
-    PowerMonitorNP[PWR_CURRENT1].fill("CURRENT1", "Heater 1 (A)", "%.2f", 0, 6, 0, 0);
-    PowerMonitorNP[PWR_VOLTAGE2].fill("VOLTAGE2", "Heater 2 (V)", "%.2f", 0, 15, 0, 0);
-    PowerMonitorNP[PWR_CURRENT2].fill("CURRENT2", "Heater 2 (A)", "%.2f", 0, 6, 0, 0);
-    PowerMonitorNP.fill(getDeviceName(), "POWER_MONITOR", "Power Monitor", MAIN_CONTROL_TAB, IP_RO, 60, IPS_IDLE);
+    // ===== Relay Controls =====
+    BCMPinsNP[0].fill("BCMPIN_DC1", "DC1", "%0.0f", 1, 27, 0, AstrAlim::RelayPins::DC1);
+    BCMPinsNP[1].fill("BCMPIN_DC2", "DC2", "%0.0f", 1, 27, 0, AstrAlim::RelayPins::DC2);
+    BCMPinsNP[2].fill("BCMPIN_DC3", "DC3", "%0.0f", 1, 27, 0, AstrAlim::RelayPins::DC3);
+    BCMPinsNP.fill(getDeviceName(), "BCMPINS", "BCM Pins", RELAYS_TAB, IP_RO, 60, IPS_IDLE);
+
+    ActiveStateSP[RELAY_STATE_LOW].fill("ACTIVE_LOW", "Active Low", ISS_OFF);
+    ActiveStateSP[RELAY_STATE_HIGH].fill("ACTIVE_HIGH", "Active High", ISS_ON);
+    ActiveStateSP.fill(getDeviceName(), "ACTIVE_STATE", "Active State", RELAYS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    Relay1SP[RELAY_SW_OFF].fill("RELAY1_OFF", "OFF", ISS_ON);
+    Relay1SP[RELAY_SW_ON].fill("RELAY1_ON", "ON", ISS_OFF);
+    Relay1SP.fill(getDeviceName(), "RELAY_1", "AstraDC1", RELAYS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    Relay2SP[RELAY_SW_OFF].fill("RELAY2_OFF", "OFF", ISS_ON);
+    Relay2SP[RELAY_SW_ON].fill("RELAY2_ON", "ON", ISS_OFF);
+    Relay2SP.fill(getDeviceName(), "RELAY_2", "AstraDC2", RELAYS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    Relay3SP[RELAY_SW_OFF].fill("RELAY3_OFF", "OFF", ISS_ON);
+    Relay3SP[RELAY_SW_ON].fill("RELAY3_ON", "ON", ISS_OFF);
+    Relay3SP.fill(getDeviceName(), "RELAY_3", "AstraDC3", RELAYS_TAB, IP_RW, ISR_1OFMANY, 60, IPS_IDLE);
+
+    // ===== INA Monitoring (Heaters + Relays) =====
+    HeaterPower1NP[HEATER_PWR_VOLTAGE].fill("HEATER1_VOLTAGE", "Voltage (V)", "%.2f", 0, 15, 0, 0);
+    HeaterPower1NP[HEATER_PWR_CURRENT].fill("HEATER1_CURRENT", "Current (A)", "%.3f", 0, 6, 0, 0);
+    HeaterPower1NP[HEATER_PWR_POWER].fill("HEATER1_POWER_W", "Power (W)", "%.2f", 0, 80, 0, 0);
+    HeaterPower1NP.fill(getDeviceName(), "HEATER_POWER_1", "Heater 1", ENERGY_MONITOR_TAB, IP_RO, 60, IPS_IDLE);
+
+    HeaterPower2NP[HEATER_PWR_VOLTAGE].fill("HEATER2_VOLTAGE", "Voltage (V)", "%.2f", 0, 15, 0, 0);
+    HeaterPower2NP[HEATER_PWR_CURRENT].fill("HEATER2_CURRENT", "Current (A)", "%.3f", 0, 6, 0, 0);
+    HeaterPower2NP[HEATER_PWR_POWER].fill("HEATER2_POWER_W", "Power (W)", "%.2f", 0, 80, 0, 0);
+    HeaterPower2NP.fill(getDeviceName(), "HEATER_POWER_2", "Heater 2", ENERGY_MONITOR_TAB, IP_RO, 60, IPS_IDLE);
+
+    RelayPowerDC1NP[RELAY_PWR_VOLTAGE].fill("DC1_VOLTAGE", "Voltage (V)", "%.2f", 0, 15, 0, 0);
+    RelayPowerDC1NP[RELAY_PWR_CURRENT].fill("DC1_CURRENT", "Current (A)", "%.3f", 0, 6, 0, 0);
+    RelayPowerDC1NP[RELAY_PWR_POWER].fill("DC1_POWER", "Power (W)", "%.2f", 0, 80, 0, 0);
+    RelayPowerDC1NP.fill(getDeviceName(), "RELAY_POWER_DC1", "Relay DC1", ENERGY_MONITOR_TAB, IP_RO, 60, IPS_IDLE);
+
+    RelayPowerDC2NP[RELAY_PWR_VOLTAGE].fill("DC2_VOLTAGE", "Voltage (V)", "%.2f", 0, 15, 0, 0);
+    RelayPowerDC2NP[RELAY_PWR_CURRENT].fill("DC2_CURRENT", "Current (A)", "%.3f", 0, 6, 0, 0);
+    RelayPowerDC2NP[RELAY_PWR_POWER].fill("DC2_POWER", "Power (W)", "%.2f", 0, 80, 0, 0);
+    RelayPowerDC2NP.fill(getDeviceName(), "RELAY_POWER_DC2", "Relay DC2", ENERGY_MONITOR_TAB, IP_RO, 60, IPS_IDLE);
+
+    RelayPowerDC3NP[RELAY_PWR_VOLTAGE].fill("DC3_VOLTAGE", "Voltage (V)", "%.2f", 0, 15, 0, 0);
+    RelayPowerDC3NP[RELAY_PWR_CURRENT].fill("DC3_CURRENT", "Current (A)", "%.3f", 0, 6, 0, 0);
+    RelayPowerDC3NP[RELAY_PWR_POWER].fill("DC3_POWER", "Power (W)", "%.2f", 0, 80, 0, 0);
+    RelayPowerDC3NP.fill(getDeviceName(), "RELAY_POWER_DC3", "Relay DC3", ENERGY_MONITOR_TAB, IP_RO, 60, IPS_IDLE);
+
+    RelayTotalPowerNP[0].fill("RELAY_TOTAL_CURRENT", "Total Current (A)", "%.2f", 0, 20, 0, 0);
+    RelayTotalPowerNP[1].fill("RELAY_TOTAL_ENERGY", "Energy (Wh)", "%.2f", 0, 10000, 0, 0);
+    RelayTotalPowerNP.fill(getDeviceName(), "RELAY_TOTAL_POWER", "Relay Total", ENERGY_MONITOR_TAB, IP_RO, 60, IPS_IDLE);
     
     addDebugControl();
     setDefaultPollingPeriod(POLL_INTERVAL_MS);
@@ -173,18 +222,18 @@ bool AstrAlimHeater::updateProperties()
     
     if (isConnected())
     {
-        defineProperty(AmbientNP);
-        defineProperty(ManualHumidityNP);
+        // ---- Main Control Tab ----
         defineProperty(Heater1TempNP);
         defineProperty(Heater1PowerNP);
         defineProperty(Heater1SetpointNP);
         defineProperty(Heater1ModeSP);
-        defineProperty(Heater1SensorTP);
-        defineProperty(Heater1SensorAssignSP);
         defineProperty(Heater2TempNP);
         defineProperty(Heater2PowerNP);
         defineProperty(Heater2SetpointNP);
         defineProperty(Heater2ModeSP);
+        // ---- Options Tab ----
+        defineProperty(Heater1SensorTP);
+        defineProperty(Heater1SensorAssignSP);
         defineProperty(Heater2SensorTP);
         defineProperty(Heater2SensorAssignSP);
         // AvailableSensorsSP sera défini dynamiquement après le scan
@@ -194,23 +243,37 @@ bool AstrAlimHeater::updateProperties()
         }
         defineProperty(SensorAssignActionSP);
         defineProperty(PIDNP);
+        // ---- Dew Point Tab ----
+        defineProperty(AmbientNP);
+        defineProperty(ManualHumidityNP);
         defineProperty(DewDeltaNP);
-        defineProperty(PowerMonitorNP);
+        // ---- Relays Tab ----
+        defineProperty(BCMPinsNP);
+        defineProperty(ActiveStateSP);
+        defineProperty(Relay1SP);
+        defineProperty(Relay2SP);
+        defineProperty(Relay3SP);
+        // ---- Energy Monitor Tab ----
+        defineProperty(HeaterPower1NP);
+        defineProperty(HeaterPower2NP);
+        defineProperty(RelayPowerDC1NP);
+        defineProperty(RelayPowerDC2NP);
+        defineProperty(RelayPowerDC3NP);
+        defineProperty(RelayTotalPowerNP);
+
     }
     else
     {
-        deleteProperty(AmbientNP);
-        deleteProperty(ManualHumidityNP);
         deleteProperty(Heater1TempNP);
         deleteProperty(Heater1PowerNP);
         deleteProperty(Heater1SetpointNP);
         deleteProperty(Heater1ModeSP);
-        deleteProperty(Heater1SensorTP);
-        deleteProperty(Heater1SensorAssignSP);
         deleteProperty(Heater2TempNP);
         deleteProperty(Heater2PowerNP);
         deleteProperty(Heater2SetpointNP);
         deleteProperty(Heater2ModeSP);
+        deleteProperty(Heater1SensorTP);
+        deleteProperty(Heater1SensorAssignSP);
         deleteProperty(Heater2SensorTP);
         deleteProperty(Heater2SensorAssignSP);
         if (AvailableSensorsSP.size() > 0)
@@ -219,8 +282,21 @@ bool AstrAlimHeater::updateProperties()
         }
         deleteProperty(SensorAssignActionSP);
         deleteProperty(PIDNP);
+        deleteProperty(AmbientNP);
+        deleteProperty(ManualHumidityNP);
         deleteProperty(DewDeltaNP);
-        deleteProperty(PowerMonitorNP);
+        deleteProperty(BCMPinsNP);
+        deleteProperty(ActiveStateSP);
+        deleteProperty(Relay1SP);
+        deleteProperty(Relay2SP);
+        deleteProperty(Relay3SP);
+        deleteProperty(HeaterPower1NP);
+        deleteProperty(HeaterPower2NP);
+        deleteProperty(RelayPowerDC1NP);
+        deleteProperty(RelayPowerDC2NP);
+        deleteProperty(RelayPowerDC3NP);
+        deleteProperty(RelayTotalPowerNP);
+
     }
     
     return true;
@@ -234,6 +310,14 @@ bool AstrAlimHeater::Connect()
         LOG_ERROR("Failed to initialize PWM. Check permissions and PWM overlay.");
         return false;
     }
+
+    if (!initRelays())
+    {
+        closePWM();
+        LOG_ERROR("Failed to initialize relay GPIOs.");
+        return false;
+    }
+    relayTotalEnergyWh = 0.0;
     
     // Scan for DS18B20 sensors
     availableDS18B20 = scanDS18B20Devices();
@@ -266,14 +350,16 @@ bool AstrAlimHeater::Connect()
     
     // Security: Force OFF mode on startup (even if saved config has different mode)
     Heater1ModeSP[MODE_OFF].setState(ISS_ON);
-    Heater1ModeSP[MODE_MANUAL].setState(ISS_OFF);
-    Heater1ModeSP[MODE_AUTO].setState(ISS_OFF);
+    Heater1ModeSP[MODE_POWER].setState(ISS_OFF);
+    Heater1ModeSP[MODE_SETPOINT].setState(ISS_OFF);
+    Heater1ModeSP[MODE_AUTO_DEW].setState(ISS_OFF);
     Heater1ModeSP.setState(IPS_IDLE);
     Heater1ModeSP.apply();
     
     Heater2ModeSP[MODE_OFF].setState(ISS_ON);
-    Heater2ModeSP[MODE_MANUAL].setState(ISS_OFF);
-    Heater2ModeSP[MODE_AUTO].setState(ISS_OFF);
+    Heater2ModeSP[MODE_POWER].setState(ISS_OFF);
+    Heater2ModeSP[MODE_SETPOINT].setState(ISS_OFF);
+    Heater2ModeSP[MODE_AUTO_DEW].setState(ISS_OFF);
     Heater2ModeSP.setState(IPS_IDLE);
     Heater2ModeSP.apply();
     
@@ -311,6 +397,8 @@ bool AstrAlimHeater::Disconnect()
     // Turn off heaters
     setPWMDuty(0, 0);
     setPWMDuty(1, 0);
+
+    shutdownRelays();
     
     closePWM();
     resetINADisplayState();
@@ -331,6 +419,7 @@ void AstrAlimHeater::TimerHit()
     readDS18B20Sensors();
     readBME280();
     readINA219();
+    updateRelaySwitchStates();
     updateSensorStatusList(false);
     
     // Mettre à jour la liste des capteurs avec statuts moins fréquemment
@@ -373,9 +462,9 @@ void AstrAlimHeater::TimerHit()
             powerNP[0].setValue(0);
             powerNP.setState(IPS_IDLE);
         }
-        else if (modeSP[MODE_MANUAL].getState() == ISS_ON)
+        else if (modeSP[MODE_POWER].getState() == ISS_ON)
         {
-            // Manual mode - use power directly
+            // Power mode - use power directly
             if (pidRunning[ch])
             {
                 pidRunning[ch] = false;
@@ -385,17 +474,32 @@ void AstrAlimHeater::TimerHit()
             setPWMDuty(ch, powerNP[0].getValue());
             powerNP.setState(IPS_OK);
         }
-        else if (modeSP[MODE_AUTO].getState() == ISS_ON)
+        else if (modeSP[MODE_SETPOINT].getState() == ISS_ON)
         {
-            // Auto mode - PID control based on dew point
-            // Utiliser le point de rosée filtré pour éviter les variations
-            double dewPoint = filteredDewPoint;
-            
-            // Si le filtre n'est pas encore initialisé, utiliser la valeur brute
-            if (dewPoint <= DEWPOINT_UNAVAILABLE + 10)
+            // Setpoint mode - fixed setpoint with PID
+            double targetTemp = setpointNP[0].getValue();
+            double currentTemp = tempNP[0].getValue();
+
+            if (currentTemp < TEMP_UNAVAILABLE - 10)
             {
-                dewPoint = AmbientNP[AMB_DEWPOINT].getValue();
+                double output = computePID(ch, targetTemp, currentTemp);
+                output = std::max(0.0, std::min(100.0, output));
+                setPWMDuty(ch, output);
+                powerNP[0].setValue(output);
+                powerNP.setState(IPS_BUSY);
             }
+            else
+            {
+                setPWMDuty(ch, 0);
+                powerNP[0].setValue(0);
+                powerNP.setState(IPS_ALERT);
+            }
+        }
+        else if (modeSP[MODE_AUTO_DEW].getState() == ISS_ON)
+        {
+            // Auto Dew mode - setpoint computed from dew point, then PID
+            // Utiliser le point de rosée filtré pour éviter les variations
+            const double dewPoint = AstrAlim::AstraBmeFetcher::getInstance().getFilteredDewPoint();
             
             double targetTemp;
             
@@ -441,105 +545,25 @@ void AstrAlimHeater::TimerHit()
 
 // ==================== PWM Control ====================
 
-std::array<bool, 10> AstrAlimHeater::buildStepPattern(double percent) const
-{
-    std::array<bool, 10> pattern {};
-    percent = std::max(0.0, std::min(100.0, percent));
-
-    const int stepCount = STEP_PWM_STEP_COUNT;
-    int highStepCount = static_cast<int>(std::lround(stepCount * percent / 100.0));
-    highStepCount = std::max(0, std::min(highStepCount, stepCount));
-
-    if (highStepCount == 0)
-        return pattern;
-
-    if (highStepCount >= stepCount)
-    {
-        pattern.fill(true);
-        return pattern;
-    }
-
-    std::set<int> distributedSteps;
-    for (int i = 0; i < highStepCount; i++)
-    {
-        int step = static_cast<int>(std::lround((static_cast<double>(i) * stepCount) / highStepCount)) % stepCount;
-        distributedSteps.insert(step);
-    }
-
-    for (int candidate = 0; candidate < stepCount && static_cast<int>(distributedSteps.size()) < highStepCount; candidate++)
-    {
-        distributedSteps.insert(candidate);
-    }
-
-    for (int step : distributedSteps)
-    {
-        pattern[step] = true;
-    }
-
-    return pattern;
-}
-
 bool AstrAlimHeater::initPWM()
 {
-    if (!pwmGpio->openChip(AstrAlim::RPI5_GPIO_CHIP))
-    {
-        LOGF_ERROR("Failed to open GPIO chip %s for step PWM", AstrAlim::RPI5_GPIO_CHIP);
-        return false;
-    }
-
-    const int gpioPins[2] = { STEP_PWM_GPIO_H1, STEP_PWM_GPIO_H2 };
-    for (int ch = 0; ch < 2; ch++)
-    {
-        if (pwmGpio->isLineUsed(gpioPins[ch]))
-        {
-            std::string consumer = pwmGpio->getLineConsumer(gpioPins[ch]);
-            if (!consumer.empty())
-            {
-                LOGF_ERROR("GPIO %d is already used by '%s'. Stop HMI/other process and retry.", gpioPins[ch], consumer.c_str());
-            }
-            else
-            {
-                LOGF_ERROR("GPIO %d is already used by another process. Stop HMI/other process and retry.", gpioPins[ch]);
-            }
-            pwmGpio->closeChip();
-            return false;
-        }
-    }
-
-    for (int ch = 0; ch < 2; ch++)
-    {
-        char consumer[64];
-        snprintf(consumer, sizeof(consumer), "heater%d@astralim_heater", ch + 1);
-        if (!pwmGpio->requestOutput(gpioPins[ch], consumer, 0))
-        {
-            LOGF_ERROR("Failed to request GPIO %d for step PWM", gpioPins[ch]);
-            pwmGpio->closeChip();
-            return false;
-        }
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(pwmStepMutex);
-        pwmDutyPercent[0] = 0.0;
-        pwmDutyPercent[1] = 0.0;
-        pwmStepPattern[0] = buildStepPattern(0.0);
-        pwmStepPattern[1] = buildStepPattern(0.0);
-        pwmStepIndex = 0;
-    }
-
     try
     {
-        pwmStepRunning = true;
-        pwmStepThread = std::thread(&AstrAlimHeater::runStepPwmLoop, this);
+        auto& fetcher = AstrAlim::AstraComFetcher::getInstance();
+        fetcher.setCyclePeriod(static_cast<double>(STEP_PWM_TICK_MS) / 1000.0);
+        fetcher.setCycleStepCount(STEP_PWM_STEP_COUNT);
+
+        pwmActors[0] = std::make_unique<AstrAlim::AstraStepPwmActor>(STEP_PWM_GPIO_H1, 0.0, "Heater1StepPwm");
+        pwmActors[1] = std::make_unique<AstrAlim::AstraStepPwmActor>(STEP_PWM_GPIO_H2, 0.0, "Heater2StepPwm");
     }
     catch (const std::exception& e)
     {
-        pwmStepRunning = false;
-        LOGF_ERROR("Failed to start step PWM thread: %s", e.what());
-        pwmGpio->closeChip();
+        LOGF_ERROR("Failed to initialize step PWM actors: %s", e.what());
+        closePWM();
         return false;
     }
-    LOGF_INFO("Step PWM started: tick=%dms steps=%d (Heater1 GPIO%d, Heater2 GPIO%d)",
+
+    LOGF_INFO("Step PWM actors started: tick=%dms steps=%d (Heater1 GPIO%d, Heater2 GPIO%d)",
               STEP_PWM_TICK_MS, STEP_PWM_STEP_COUNT, STEP_PWM_GPIO_H1, STEP_PWM_GPIO_H2);
 
     return true;
@@ -547,27 +571,152 @@ bool AstrAlimHeater::initPWM()
 
 void AstrAlimHeater::closePWM()
 {
-    pwmStepRunning = false;
-    pwmStepCv.notify_all();
-
-    if (pwmStepThread.joinable())
-    {
-        pwmStepThread.join();
-    }
+    if (pwmActors[0])
+        pwmActors[0].reset();
+    if (pwmActors[1])
+        pwmActors[1].reset();
 
     if (pwmGpio && pwmGpio->isOpen())
     {
-        pwmGpio->setValue(STEP_PWM_GPIO_H1, 0);
-        pwmGpio->setValue(STEP_PWM_GPIO_H2, 0);
         pwmGpio->closeChip();
     }
+}
 
-    std::lock_guard<std::mutex> lock(pwmStepMutex);
-    pwmDutyPercent[0] = 0.0;
-    pwmDutyPercent[1] = 0.0;
-    pwmStepPattern[0] = buildStepPattern(0.0);
-    pwmStepPattern[1] = buildStepPattern(0.0);
-    pwmStepIndex = 0;
+bool AstrAlimHeater::initRelays()
+{
+    if (!pwmGpio->isOpen() && !pwmGpio->openChip(AstrAlim::RPI5_GPIO_CHIP))
+    {
+        LOGF_ERROR("Failed to open GPIO chip %s for relays", AstrAlim::RPI5_GPIO_CHIP);
+        return false;
+    }
+
+    activeState = (ActiveStateSP[RELAY_STATE_HIGH].getState() == ISS_ON) ? 1 : 0;
+
+    const int pins[3] = {
+        static_cast<int>(BCMPinsNP[0].getValue()),
+        static_cast<int>(BCMPinsNP[1].getValue()),
+        static_cast<int>(BCMPinsNP[2].getValue())
+    };
+
+    for (int i = 0; i < 3; i++)
+    {
+        if (pwmGpio->isLineUsed(pins[i]))
+        {
+            std::string consumer = pwmGpio->getLineConsumer(pins[i]);
+            if (!consumer.empty())
+            {
+                LOGF_ERROR("GPIO pin %d (DC%d) is already in use by '%s'", pins[i], i + 1, consumer.c_str());
+            }
+            else
+            {
+                LOGF_ERROR("GPIO pin %d (DC%d) is already in use", pins[i], i + 1);
+            }
+            return false;
+        }
+    }
+
+    for (int i = 0; i < 3; i++)
+    {
+        char consumer[32];
+        snprintf(consumer, sizeof(consumer), "dc%d@astralim_heater", i + 1);
+        const int initialValue = !activeState;
+        if (!pwmGpio->requestOutput(pins[i], consumer, initialValue))
+        {
+            LOGF_ERROR("Failed to request GPIO pin %d for relay DC%d", pins[i], i + 1);
+            return false;
+        }
+        relayGpioState[i] = initialValue;
+    }
+
+    Relay1SP[RELAY_SW_OFF].setState(ISS_ON);
+    Relay1SP[RELAY_SW_ON].setState(ISS_OFF);
+    Relay1SP.setState(IPS_IDLE);
+    Relay1SP.apply();
+
+    Relay2SP[RELAY_SW_OFF].setState(ISS_ON);
+    Relay2SP[RELAY_SW_ON].setState(ISS_OFF);
+    Relay2SP.setState(IPS_IDLE);
+    Relay2SP.apply();
+
+    Relay3SP[RELAY_SW_OFF].setState(ISS_ON);
+    Relay3SP[RELAY_SW_ON].setState(ISS_OFF);
+    Relay3SP.setState(IPS_IDLE);
+    Relay3SP.apply();
+
+    return true;
+}
+
+void AstrAlimHeater::shutdownRelays()
+{
+    setRelay(0, false);
+    setRelay(1, false);
+    setRelay(2, false);
+}
+
+bool AstrAlimHeater::setRelay(int relayIndex, bool on)
+{
+    if (relayIndex < 0 || relayIndex > 2)
+        return false;
+
+    const int pin = static_cast<int>(BCMPinsNP[relayIndex].getValue());
+    const int gpioValue = on ? activeState : !activeState;
+
+    if (!pwmGpio->setValue(pin, gpioValue))
+        return false;
+
+    relayGpioState[relayIndex] = gpioValue;
+    return true;
+}
+
+void AstrAlimHeater::updateRelaySwitchStates()
+{
+    const int pins[3] = {
+        static_cast<int>(BCMPinsNP[0].getValue()),
+        static_cast<int>(BCMPinsNP[1].getValue()),
+        static_cast<int>(BCMPinsNP[2].getValue())
+    };
+
+    int gpioValue = pwmGpio->getValue(pins[0]);
+    if (gpioValue >= 0)
+    {
+        const bool logicalOn = (activeState == 0) ? (gpioValue == 0) : (gpioValue == 1);
+        const bool currentlyOn = (Relay1SP[RELAY_SW_ON].getState() == ISS_ON);
+        if (logicalOn != currentlyOn)
+        {
+            Relay1SP.reset();
+            Relay1SP[logicalOn ? RELAY_SW_ON : RELAY_SW_OFF].setState(ISS_ON);
+            Relay1SP.setState(logicalOn ? IPS_OK : IPS_IDLE);
+            Relay1SP.apply();
+        }
+    }
+
+    gpioValue = pwmGpio->getValue(pins[1]);
+    if (gpioValue >= 0)
+    {
+        const bool logicalOn = (activeState == 0) ? (gpioValue == 0) : (gpioValue == 1);
+        const bool currentlyOn = (Relay2SP[RELAY_SW_ON].getState() == ISS_ON);
+        if (logicalOn != currentlyOn)
+        {
+            Relay2SP.reset();
+            Relay2SP[logicalOn ? RELAY_SW_ON : RELAY_SW_OFF].setState(ISS_ON);
+            Relay2SP.setState(logicalOn ? IPS_OK : IPS_IDLE);
+            Relay2SP.apply();
+        }
+    }
+
+    gpioValue = pwmGpio->getValue(pins[2]);
+    if (gpioValue >= 0)
+    {
+        const bool logicalOn = (activeState == 0) ? (gpioValue == 0) : (gpioValue == 1);
+        const bool currentlyOn = (Relay3SP[RELAY_SW_ON].getState() == ISS_ON);
+        if (logicalOn != currentlyOn)
+        {
+            Relay3SP.reset();
+            Relay3SP[logicalOn ? RELAY_SW_ON : RELAY_SW_OFF].setState(ISS_ON);
+            Relay3SP.setState(logicalOn ? IPS_OK : IPS_IDLE);
+            Relay3SP.apply();
+        }
+    }
 }
 
 bool AstrAlimHeater::setPWMDuty(int channel, double percent)
@@ -577,44 +726,17 @@ bool AstrAlimHeater::setPWMDuty(int channel, double percent)
 
     percent = std::max(0.0, std::min(100.0, percent));
 
+    if (!pwmActors[channel])
+        return false;
+
+    try
     {
-        std::lock_guard<std::mutex> lock(pwmStepMutex);
-        pwmDutyPercent[channel] = percent;
-        pwmStepPattern[channel] = buildStepPattern(percent);
+        pwmActors[channel]->setStepPercent(percent);
+        return true;
     }
-    pwmStepCv.notify_one();
-
-    return true;
-}
-
-void AstrAlimHeater::runStepPwmLoop()
-{
-    while (pwmStepRunning)
+    catch (const std::exception&)
     {
-        int valueH1 = 0;
-        int valueH2 = 0;
-        {
-            std::lock_guard<std::mutex> lock(pwmStepMutex);
-            valueH1 = pwmStepPattern[0][pwmStepIndex] ? 1 : 0;
-            valueH2 = pwmStepPattern[1][pwmStepIndex] ? 1 : 0;
-            pwmStepIndex = (pwmStepIndex + 1) % STEP_PWM_STEP_COUNT;
-        }
-
-        if (pwmGpio && pwmGpio->isOpen())
-        {
-            pwmGpio->setValue(STEP_PWM_GPIO_H1, valueH1);
-            pwmGpio->setValue(STEP_PWM_GPIO_H2, valueH2);
-        }
-
-        std::unique_lock<std::mutex> lock(pwmStepMutex);
-        pwmStepCv.wait_for(lock, std::chrono::milliseconds(STEP_PWM_TICK_MS),
-                           [this]() { return !pwmStepRunning.load(); });
-    }
-
-    if (pwmGpio && pwmGpio->isOpen())
-    {
-        pwmGpio->setValue(STEP_PWM_GPIO_H1, 0);
-        pwmGpio->setValue(STEP_PWM_GPIO_H2, 0);
+        return false;
     }
 }
 
@@ -708,171 +830,22 @@ bool AstrAlimHeater::readDS18B20Sensors()
 
 bool AstrAlimHeater::readBME280()
 {
-    try
-    {
-        if (!ambientBmeSensor)
-        {
-            ambientBmeSensor = std::make_unique<AstrAlim::Bme280>();
-            ambientBmeSensor->loadCalibrationData();
-            ambientBmeSensor->configureNormalMode();
-        }
+    auto& fetcher = AstrAlim::AstraBmeFetcher::getInstance();
+    fetcher.setManualHumidity(ManualHumidityNP[0].getValue());
+    fetcher.getMeasurement(0, POLL_INTERVAL_MS / 1000.0);
 
-        double temp = 0.0;
-        double pressure = 0.0;
-        double humidity = 0.0;
-        std::tie(temp, pressure, humidity) = ambientBmeSensor->acquireDataNormalMode();
+    AmbientNP[AMB_TEMPERATURE].setValue(fetcher.getBmeTemp());
+    AmbientNP[AMB_PRESSURE].setValue(fetcher.getBmePressure());
+    AmbientNP[AMB_HUMIDITY].setValue(fetcher.getBmeHumidity());
 
-        if (humidity == 0)
-            humidity = ManualHumidityNP[0].getValue();
+    const double dp = fetcher.getFilteredDewPoint();
+    AmbientNP[AMB_DEWPOINT].setValue(dp > DEWPOINT_UNAVAILABLE + 10 ? dp : DEWPOINT_UNAVAILABLE);
 
-        filteredTemp = filterValue(temp, tempHistory, TEMP_HUMIDITY_MIN_CHANGE);
-        filteredHumidity = filterValue(humidity, humidityHistory, TEMP_HUMIDITY_MIN_CHANGE);
-
-        AmbientNP[AMB_TEMPERATURE].setValue(temp);
-        AmbientNP[AMB_PRESSURE].setValue(pressure);
-        AmbientNP[AMB_HUMIDITY].setValue(humidity);
-
-        if (humidity > 0)
-        {
-            double dewPoint = calculateDewPoint(filteredTemp, filteredHumidity);
-            filteredDewPoint = filterDewPoint(dewPoint);
-            AmbientNP[AMB_DEWPOINT].setValue(filteredDewPoint);
-        }
-        else
-        {
-            dewPointHistory.clear();
-            tempHistory.clear();
-            humidityHistory.clear();
-            filteredDewPoint = DEWPOINT_UNAVAILABLE;
-            AmbientNP[AMB_DEWPOINT].setValue(DEWPOINT_UNAVAILABLE);
-        }
-
-        AmbientNP.setState(IPS_OK);
-        AmbientNP.apply();
-        return true;
-    }
-    catch (const std::exception&)
-    {
-        ambientBmeSensor.reset();
-        AmbientNP.setState(IPS_ALERT);
-        AmbientNP.apply();
-        return false;
-    }
+    AmbientNP.setState(fetcher.isPresentBme() ? IPS_OK : IPS_ALERT);
+    AmbientNP.apply();
+    return fetcher.isPresentBme();
 }
 
-double AstrAlimHeater::calculateDewPoint(double temp, double humidity)
-{
-    // Magnus formula
-    // ref: https://fr.wikipedia.org/wiki/Point_de_ros%C3%A9e
-    const double a = 17.27;
-    const double b = 237.7;
-    
-    double alpha = ((a * temp) / (b + temp)) + std::log(humidity / 100.0);
-    double dewPoint = (b * alpha) / (a - alpha);
-    
-    return dewPoint;
-}
-
-double AstrAlimHeater::filterDewPoint(double newDewPoint)
-{
-    // Si l'historique est vide, initialiser avec la nouvelle valeur
-    if (dewPointHistory.empty())
-    {
-        dewPointHistory.push_back(newDewPoint);
-        return newDewPoint;
-    }
-    
-    // Calculer la moyenne actuelle avant d'ajouter la nouvelle valeur
-    double currentAverage = 0.0;
-    if (dewPointHistory.size() > 0)
-    {
-        double sum = 0.0;
-        for (double value : dewPointHistory)
-        {
-            sum += value;
-        }
-        currentAverage = sum / dewPointHistory.size();
-    }
-    
-    // Vérifier si la variation est significative
-    double change = std::abs(newDewPoint - currentAverage);
-    
-    // Si la variation est trop faible, ne pas mettre à jour l'historique
-    // mais retourner la moyenne actuelle pour maintenir la stabilité
-    if (change < DEW_POINT_MIN_CHANGE && dewPointHistory.size() >= 3)
-    {
-        return currentAverage;
-    }
-    
-    // Ajouter la nouvelle valeur à l'historique seulement si la variation est significative
-    dewPointHistory.push_back(newDewPoint);
-    
-    // Limiter la taille de l'historique
-    if (dewPointHistory.size() > DEW_POINT_FILTER_SIZE)
-    {
-        dewPointHistory.erase(dewPointHistory.begin());
-    }
-    
-    // Calculer la nouvelle moyenne mobile
-    double sum = 0.0;
-    for (double value : dewPointHistory)
-    {
-        sum += value;
-    }
-    double average = sum / dewPointHistory.size();
-    
-    return average;
-}
-
-double AstrAlimHeater::filterValue(double newValue, std::vector<double>& history, double minChange)
-{
-    // Si l'historique est vide, initialiser avec la nouvelle valeur
-    if (history.empty())
-    {
-        history.push_back(newValue);
-        return newValue;
-    }
-    
-    // Calculer la moyenne actuelle
-    double currentAverage = 0.0;
-    if (history.size() > 0)
-    {
-        double sum = 0.0;
-        for (double value : history)
-        {
-            sum += value;
-        }
-        currentAverage = sum / history.size();
-    }
-    
-    // Vérifier si la variation est significative
-    double change = std::abs(newValue - currentAverage);
-    
-    // Si la variation est trop faible, ne pas mettre à jour l'historique
-    if (change < minChange && history.size() >= 3)
-    {
-        return currentAverage;
-    }
-    
-    // Ajouter la nouvelle valeur à l'historique seulement si la variation est significative
-    history.push_back(newValue);
-    
-    // Limiter la taille de l'historique (même taille que pour le point de rosée)
-    if (history.size() > DEW_POINT_FILTER_SIZE)
-    {
-        history.erase(history.begin());
-    }
-    
-    // Calculer la nouvelle moyenne mobile
-    double sum = 0.0;
-    for (double value : history)
-    {
-        sum += value;
-    }
-    double average = sum / history.size();
-    
-    return average;
-}
 
 // ==================== PID Control ====================
 
@@ -901,10 +874,10 @@ bool AstrAlimHeater::ISNewNumber(const char* dev, const char* name, double value
 {
     if (dev && strcmp(dev, getDeviceName()) == 0)
     {
-        // Heater 1 Power (manual mode)
+        // Heater 1 Power (power mode)
         if (Heater1PowerNP.isNameMatch(name))
         {
-            if (Heater1ModeSP[MODE_MANUAL].getState() == ISS_ON)
+            if (Heater1ModeSP[MODE_POWER].getState() == ISS_ON)
             {
                 Heater1PowerNP.update(values, names, n);
                 setPWMDuty(0, Heater1PowerNP[0].getValue());
@@ -915,10 +888,10 @@ bool AstrAlimHeater::ISNewNumber(const char* dev, const char* name, double value
             return true;
         }
         
-        // Heater 2 Power (manual mode)
+        // Heater 2 Power (power mode)
         if (Heater2PowerNP.isNameMatch(name))
         {
-            if (Heater2ModeSP[MODE_MANUAL].getState() == ISS_ON)
+            if (Heater2ModeSP[MODE_POWER].getState() == ISS_ON)
             {
                 Heater2PowerNP.update(values, names, n);
                 setPWMDuty(1, Heater2PowerNP[0].getValue());
@@ -1000,17 +973,24 @@ bool AstrAlimHeater::ISNewSwitch(const char* dev, const char* name, ISState* sta
                 Heater1ModeSP.setState(IPS_IDLE);
                 LOG_INFO("Heater 1 turned OFF");
             }
-            else if (Heater1ModeSP[MODE_MANUAL].getState() == ISS_ON)
+            else if (Heater1ModeSP[MODE_POWER].getState() == ISS_ON)
             {
                 Heater1ModeSP.setState(IPS_OK);
-                LOG_INFO("Heater 1 set to MANUAL mode");
+                LOG_INFO("Heater 1 set to POWER mode");
             }
-            else if (Heater1ModeSP[MODE_AUTO].getState() == ISS_ON)
+            else if (Heater1ModeSP[MODE_SETPOINT].getState() == ISS_ON)
             {
                 pidIntegral[0] = 0;
                 pidLastError[0] = 0;
                 Heater1ModeSP.setState(IPS_BUSY);
-                LOG_INFO("Heater 1 set to AUTO (dew point) mode");
+                LOG_INFO("Heater 1 set to SETPOINT mode");
+            }
+            else if (Heater1ModeSP[MODE_AUTO_DEW].getState() == ISS_ON)
+            {
+                pidIntegral[0] = 0;
+                pidLastError[0] = 0;
+                Heater1ModeSP.setState(IPS_BUSY);
+                LOG_INFO("Heater 1 set to AUTO DEW mode");
             }
             
             Heater1ModeSP.apply();
@@ -1030,17 +1010,24 @@ bool AstrAlimHeater::ISNewSwitch(const char* dev, const char* name, ISState* sta
                 Heater2ModeSP.setState(IPS_IDLE);
                 LOG_INFO("Heater 2 turned OFF");
             }
-            else if (Heater2ModeSP[MODE_MANUAL].getState() == ISS_ON)
+            else if (Heater2ModeSP[MODE_POWER].getState() == ISS_ON)
             {
                 Heater2ModeSP.setState(IPS_OK);
-                LOG_INFO("Heater 2 set to MANUAL mode");
+                LOG_INFO("Heater 2 set to POWER mode");
             }
-            else if (Heater2ModeSP[MODE_AUTO].getState() == ISS_ON)
+            else if (Heater2ModeSP[MODE_SETPOINT].getState() == ISS_ON)
             {
                 pidIntegral[1] = 0;
                 pidLastError[1] = 0;
                 Heater2ModeSP.setState(IPS_BUSY);
-                LOG_INFO("Heater 2 set to AUTO (dew point) mode");
+                LOG_INFO("Heater 2 set to SETPOINT mode");
+            }
+            else if (Heater2ModeSP[MODE_AUTO_DEW].getState() == ISS_ON)
+            {
+                pidIntegral[1] = 0;
+                pidLastError[1] = 0;
+                Heater2ModeSP.setState(IPS_BUSY);
+                LOG_INFO("Heater 2 set to AUTO DEW mode");
             }
             
             Heater2ModeSP.apply();
@@ -1314,6 +1301,73 @@ bool AstrAlimHeater::ISNewSwitch(const char* dev, const char* name, ISState* sta
             SensorAssignActionSP.apply();
             return true;
         }
+
+        // Relay active state
+        if (ActiveStateSP.isNameMatch(name))
+        {
+            if (isConnected())
+            {
+                LOG_WARN("Cannot change relay active state while connected");
+                return true;
+            }
+
+            ActiveStateSP.update(states, names, n);
+            activeState = (ActiveStateSP[RELAY_STATE_HIGH].getState() == ISS_ON) ? 1 : 0;
+            ActiveStateSP.setState(IPS_OK);
+            ActiveStateSP.apply();
+            return true;
+        }
+
+        // Relay 1
+        if (Relay1SP.isNameMatch(name))
+        {
+            Relay1SP.update(states, names, n);
+            const bool turnOn = (Relay1SP[RELAY_SW_ON].getState() == ISS_ON);
+            if (!setRelay(0, turnOn))
+            {
+                Relay1SP.setState(IPS_ALERT);
+                Relay1SP.apply();
+                return true;
+            }
+
+            Relay1SP.setState(turnOn ? IPS_OK : IPS_IDLE);
+            Relay1SP.apply();
+            return true;
+        }
+
+        // Relay 2
+        if (Relay2SP.isNameMatch(name))
+        {
+            Relay2SP.update(states, names, n);
+            const bool turnOn = (Relay2SP[RELAY_SW_ON].getState() == ISS_ON);
+            if (!setRelay(1, turnOn))
+            {
+                Relay2SP.setState(IPS_ALERT);
+                Relay2SP.apply();
+                return true;
+            }
+
+            Relay2SP.setState(turnOn ? IPS_OK : IPS_IDLE);
+            Relay2SP.apply();
+            return true;
+        }
+
+        // Relay 3
+        if (Relay3SP.isNameMatch(name))
+        {
+            Relay3SP.update(states, names, n);
+            const bool turnOn = (Relay3SP[RELAY_SW_ON].getState() == ISS_ON);
+            if (!setRelay(2, turnOn))
+            {
+                Relay3SP.setState(IPS_ALERT);
+                Relay3SP.apply();
+                return true;
+            }
+
+            Relay3SP.setState(turnOn ? IPS_OK : IPS_IDLE);
+            Relay3SP.apply();
+            return true;
+        }
     }
     
     return INDI::DefaultDevice::ISNewSwitch(dev, name, states, names, n);
@@ -1489,6 +1543,10 @@ bool AstrAlimHeater::saveConfigItems(FILE* fp)
     PIDNP.save(fp);
     DewDeltaNP.save(fp);
     ManualHumidityNP.save(fp);
+    ActiveStateSP.save(fp);
+    Relay1SP.save(fp);
+    Relay2SP.save(fp);
+    Relay3SP.save(fp);
     Heater1SensorTP.save(fp);
     Heater2SensorTP.save(fp);
     
@@ -1798,18 +1856,19 @@ bool AstrAlimHeater::autoDetectSensor(int heaterChannel)
     INDI::PropertySwitch& modeSP = (heaterChannel == 0) ? Heater1ModeSP : Heater2ModeSP;
     INDI::PropertyNumber& powerNP = (heaterChannel == 0) ? Heater1PowerNP : Heater2PowerNP;
     
-    // Vérifier que le heater n'est pas déjà en mode AUTO ou MANUAL avec puissance
-    if (modeSP[MODE_AUTO].getState() == ISS_ON || 
-        (modeSP[MODE_MANUAL].getState() == ISS_ON && powerNP[0].getValue() > 0))
+    // Vérifier que le heater n'est pas déjà en mode AUTO_DEW ou POWER avec puissance
+    if (modeSP[MODE_AUTO_DEW].getState() == ISS_ON || 
+        (modeSP[MODE_POWER].getState() == ISS_ON && powerNP[0].getValue() > 0))
     {
-        LOG_ERROR("Cannot start auto-detect: heater must be in OFF mode or MANUAL with 0% power");
+        LOG_ERROR("Cannot start auto-detect: heater must be in OFF mode or POWER with 0% power");
         return false;
     }
     
-    // Activer le mode MANUAL temporairement
+    // Activer le mode POWER temporairement
     modeSP[MODE_OFF].setState(ISS_OFF);
-    modeSP[MODE_MANUAL].setState(ISS_ON);
-    modeSP[MODE_AUTO].setState(ISS_OFF);
+    modeSP[MODE_POWER].setState(ISS_ON);
+    modeSP[MODE_SETPOINT].setState(ISS_OFF);
+    modeSP[MODE_AUTO_DEW].setState(ISS_OFF);
     modeSP.setState(IPS_BUSY);
     modeSP.apply();
     
@@ -1880,8 +1939,9 @@ void AstrAlimHeater::handleAutoDetect(int heaterChannel)
         setPWMDuty(heaterChannel, 0);
         powerNP[0].setValue(0);
         modeSP[MODE_OFF].setState(ISS_ON);
-        modeSP[MODE_MANUAL].setState(ISS_OFF);
-        modeSP[MODE_AUTO].setState(ISS_OFF);
+        modeSP[MODE_POWER].setState(ISS_OFF);
+        modeSP[MODE_SETPOINT].setState(ISS_OFF);
+        modeSP[MODE_AUTO_DEW].setState(ISS_OFF);
         modeSP.setState(IPS_IDLE);
         modeSP.apply();
         powerNP.apply();
@@ -1936,154 +1996,113 @@ bool AstrAlimHeater::testSensorResponse(int heaterChannel, const std::string& se
 
 void AstrAlimHeater::readINA219()
 {
-    // Read INA219 sensors for heaters (AstraPwm1 and AstraPwm2)
-    // Addresses (INDI mapping): 0x4d (Heater 1), 0x49 (Heater 2)
-    bool valid1 = false;
-    bool valid2 = false;
-    bool currentValid1 = false;
-    bool currentValid2 = false;
-    double sampleV1 = 0.0;
-    double sampleI1 = 0.0;
-    double sampleV2 = 0.0;
-    double sampleI2 = 0.0;
-    std::string errorTag1 = "MISSING";
-    std::string errorTag2 = "MISSING";
+    enum class InaTarget { H1, H2, DC1, DC2, DC3 };
 
-    auto readChannel = [this](int channel, int address, bool& valid, bool& currentValid,
-                              double& voltage, double& current, std::string& errorTag)
+    struct InaEntry
     {
+        int address;
+        std::unique_ptr<AstrAlim::AstraIna>* sensor;
+        InaTarget target;
+        bool isRelay;
+    };
+
+    std::array<InaEntry, 5> entries = {{
+        {INA_ADDR_H1, &inaSensors[0], InaTarget::H1, false},
+        {INA_ADDR_H2, &inaSensors[1], InaTarget::H2, false},
+        {INA_RELAY_DC1_ADDR, &relayInaSensors[0], InaTarget::DC1, true},
+        {INA_RELAY_DC2_ADDR, &relayInaSensors[1], InaTarget::DC2, true},
+        {INA_RELAY_DC3_ADDR, &relayInaSensors[2], InaTarget::DC3, true},
+    }};
+
+    double totalCurrent = 0.0;
+    double totalPower = 0.0;
+
+    for (auto& entry : entries)
+    {
+        double voltageV = 0.0;
+        double currentA = 0.0;
+        double powerW = 0.0;
+        bool valid = false;
+
         try
         {
-            if (!inaSensors[channel])
+            if (!(*entry.sensor))
             {
-                inaSensors[channel] = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, address, "", false);
+                *entry.sensor = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, entry.address, "", true);
             }
 
-            double samplePower = 0.0;
-            valid = inaSensors[channel]->readSample(POLL_INTERVAL_MS / 1000.0, voltage, current, samplePower);
+            valid = (*entry.sensor)->getPingOK() && ((*entry.sensor)->intPeriodS() > 0.0);
             if (valid)
             {
-                currentValid = true;
-                errorTag = "OK";
-            }
-            else
-            {
-                currentValid = false;
-                voltage = 0.0;
-                current = 0.0;
-                errorTag = "IO";
+                voltageV = std::max(0.0, (*entry.sensor)->voltageV());
+                currentA = std::max(0.0, std::fabs((*entry.sensor)->currentA()));
+                powerW = std::max(0.0, (*entry.sensor)->powerW());
+
+                if (!entry.isRelay)
+                {
+                    const int heaterIdx = (entry.target == InaTarget::H1) ? 0 : 1;
+                    inaDisplayVoltage[heaterIdx] = voltageV;
+                    inaDisplayCurrent[heaterIdx] = currentA;
+                    inaDisplayPower[heaterIdx] = powerW;
+                }
+                else
+                {
+                    totalCurrent += currentA;
+                    totalPower += powerW;
+                }
             }
         }
         catch (const std::exception&)
         {
+            (*entry.sensor).reset();
             valid = false;
-            currentValid = false;
-            voltage = 0.0;
-            current = 0.0;
-            errorTag = "IO";
-            inaSensors[channel].reset();
         }
-    };
 
-    readChannel(0, INA_ADDR_H1, valid1, currentValid1, sampleV1, sampleI1, errorTag1);
-    readChannel(1, INA_ADDR_H2, valid2, currentValid2, sampleV2, sampleI2, errorTag2);
-
-    const bool heater1Active = (Heater1PowerNP[0].getValue() > 1.0);
-    const bool heater2Active = (Heater2PowerNP[0].getValue() > 1.0);
-
-    auto now = std::chrono::steady_clock::now();
-    auto handleNoResponseReset = [this, now](int ch, bool validSample, bool heaterActive)
-    {
-        if (validSample)
+        switch (entry.target)
         {
-            inaNoResponseActive[ch] = false;
-            return;
+            case InaTarget::H1:
+                HeaterPower1NP[HEATER_PWR_VOLTAGE].setValue(voltageV);
+                HeaterPower1NP[HEATER_PWR_CURRENT].setValue(currentA);
+                HeaterPower1NP[HEATER_PWR_POWER].setValue(powerW);
+                HeaterPower1NP.setState(valid ? IPS_OK : IPS_IDLE);
+                HeaterPower1NP.apply();
+                break;
+            case InaTarget::H2:
+                HeaterPower2NP[HEATER_PWR_VOLTAGE].setValue(voltageV);
+                HeaterPower2NP[HEATER_PWR_CURRENT].setValue(currentA);
+                HeaterPower2NP[HEATER_PWR_POWER].setValue(powerW);
+                HeaterPower2NP.setState(valid ? IPS_OK : IPS_IDLE);
+                HeaterPower2NP.apply();
+                break;
+            case InaTarget::DC1:
+                RelayPowerDC1NP[RELAY_PWR_VOLTAGE].setValue(voltageV);
+                RelayPowerDC1NP[RELAY_PWR_CURRENT].setValue(currentA);
+                RelayPowerDC1NP[RELAY_PWR_POWER].setValue(powerW);
+                RelayPowerDC1NP.setState(valid ? IPS_OK : IPS_IDLE);
+                RelayPowerDC1NP.apply();
+                break;
+            case InaTarget::DC2:
+                RelayPowerDC2NP[RELAY_PWR_VOLTAGE].setValue(voltageV);
+                RelayPowerDC2NP[RELAY_PWR_CURRENT].setValue(currentA);
+                RelayPowerDC2NP[RELAY_PWR_POWER].setValue(powerW);
+                RelayPowerDC2NP.setState(valid ? IPS_OK : IPS_IDLE);
+                RelayPowerDC2NP.apply();
+                break;
+            case InaTarget::DC3:
+                RelayPowerDC3NP[RELAY_PWR_VOLTAGE].setValue(voltageV);
+                RelayPowerDC3NP[RELAY_PWR_CURRENT].setValue(currentA);
+                RelayPowerDC3NP[RELAY_PWR_POWER].setValue(powerW);
+                RelayPowerDC3NP.setState(valid ? IPS_OK : IPS_IDLE);
+                RelayPowerDC3NP.apply();
+                break;
         }
+    }
 
-        // Only attempt bus-level recovery when channel is actually in use
-        // or already had valid telemetry before.
-        if (!heaterActive && !inaHasSample[ch])
-            return;
-
-        if (!inaNoResponseActive[ch])
-        {
-            inaNoResponseActive[ch] = true;
-            inaNoResponseSince[ch] = now;
-            return;
-        }
-
-        auto silenceMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - inaNoResponseSince[ch]).count();
-        if (silenceMs < INA_NO_RESPONSE_RESET_DELAY_MS)
-            return;
-
-        auto sinceLastResetMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - inaLastResetAttempt[ch]).count();
-        if (sinceLastResetMs < INA_RESET_COOLDOWN_MS)
-            return;
-
-        inaLastResetAttempt[ch] = now;
-        bool resetOk = resetINAChannel(ch);
-        inaNoResponseSince[ch] = now;
-        if (resetOk)
-        {
-            LOGF_WARN("Heater %d INA no response for >= %dms: reset sent on address 0x%02x",
-                      ch + 1, INA_NO_RESPONSE_RESET_DELAY_MS, (ch == 0) ? INA_ADDR_H1 : INA_ADDR_H2);
-        }
-        else
-        {
-            LOGF_WARN("Heater %d INA no response: reset failed on address 0x%02x",
-                      ch + 1, (ch == 0) ? INA_ADDR_H1 : INA_ADDR_H2);
-        }
-    };
-
-    handleNoResponseReset(0, valid1, heater1Active);
-    handleNoResponseReset(1, valid2, heater2Active);
-
-    auto logINAStatus = [this](int ch, bool sampleValid, bool sampleCurrentValid, const std::string& tag, bool heaterActive)
-    {
-        if (sampleValid && sampleCurrentValid)
-        {
-            inaLastErrorTag[ch].clear();
-            inaErrorLogCount[ch] = 0;
-            return;
-        }
-
-        if (!heaterActive)
-            return;
-
-        std::string effectiveTag = tag.empty() ? "UNKNOWN" : tag;
-        if (inaLastErrorTag[ch] != effectiveTag)
-        {
-            inaLastErrorTag[ch] = effectiveTag;
-            inaErrorLogCount[ch] = 1;
-            LOGF_WARN("Heater %d INA unstable (%s). Keeping last informative values.", ch + 1, effectiveTag.c_str());
-            return;
-        }
-
-        inaErrorLogCount[ch]++;
-        if ((inaErrorLogCount[ch] % INA_LOG_REPEAT_CYCLES) == 0)
-        {
-            LOGF_WARN("Heater %d INA still unstable (%s) x%d", ch + 1, effectiveTag.c_str(), inaErrorLogCount[ch]);
-        }
-    };
-
-    logINAStatus(0, valid1, currentValid1, errorTag1, heater1Active);
-    logINAStatus(1, valid2, currentValid2, errorTag2, heater2Active);
-
-    applyINAChannelSample(0, valid1, currentValid1, sampleV1, sampleI1, heater1Active);
-    applyINAChannelSample(1, valid2, currentValid2, sampleV2, sampleI2, heater2Active);
-
-    PowerMonitorNP[PWR_VOLTAGE1].setValue(inaDisplayVoltage[0]);
-    PowerMonitorNP[PWR_CURRENT1].setValue(inaDisplayCurrent[0]);
-    PowerMonitorNP[PWR_VOLTAGE2].setValue(inaDisplayVoltage[1]);
-    PowerMonitorNP[PWR_CURRENT2].setValue(inaDisplayCurrent[1]);
-    
-    // Set state based on whether we have valid readings
-    bool hasData = (PowerMonitorNP[PWR_VOLTAGE1].getValue() > 0 || 
-                    PowerMonitorNP[PWR_CURRENT1].getValue() > 0 ||
-                    PowerMonitorNP[PWR_VOLTAGE2].getValue() > 0 || 
-                    PowerMonitorNP[PWR_CURRENT2].getValue() > 0);
-    PowerMonitorNP.setState(hasData ? IPS_OK : IPS_IDLE);
-    PowerMonitorNP.apply();
+    RelayTotalPowerNP[0].setValue(totalCurrent);
+    relayTotalEnergyWh += totalPower * (static_cast<double>(POLL_INTERVAL_MS) / 3600000.0);
+    RelayTotalPowerNP[1].setValue(relayTotalEnergyWh);
+    RelayTotalPowerNP.setState((totalCurrent > 0.0 || totalPower > 0.0) ? IPS_OK : IPS_IDLE);
+    RelayTotalPowerNP.apply();
 }
 
 bool AstrAlimHeater::resetINAChannel(int channel)
@@ -2097,7 +2116,7 @@ bool AstrAlimHeater::resetINAChannel(int channel)
     {
         inaSensors[channel].reset();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        inaSensors[channel] = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, address, "", false);
+        inaSensors[channel] = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, address, "", true);
         return true;
     }
     catch (const std::exception&)
@@ -2114,6 +2133,7 @@ void AstrAlimHeater::resetINADisplayState()
     {
         inaDisplayVoltage[ch] = 0.0;
         inaDisplayCurrent[ch] = 0.0;
+        inaDisplayPower[ch] = 0.0;
         inaHasSample[ch] = false;
         inaInvalidCount[ch] = 0;
         inaZeroWhileActiveCount[ch] = 0;

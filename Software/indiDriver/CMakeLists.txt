@@ -76,6 +76,8 @@ install(TARGETS indi_astralim_system RUNTIME DESTINATION bin)
 add_executable(indi_astralim_heater
     ${CMAKE_CURRENT_SOURCE_DIR}/hmi/heater/astralim_heater.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hmi/heater/astralim_bme280.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hmi/heater/astralim_bme_fetcher.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hmi/heater/astralim_step_pwm_actor.cpp
     ${indi_common_SRCS}
     ${gpio_SRCS}
 )

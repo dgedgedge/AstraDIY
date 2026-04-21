@@ -17,6 +17,15 @@ AstraComActor::AstraComActor(std::string nameValue)
     registeredFetcher = &fetcher;
 }
 
+AstraComActor::~AstraComActor()
+{
+    if (registeredFetcher)
+    {
+        registeredFetcher->removeActor(*this);
+        registeredFetcher = nullptr;
+    }
+}
+
 void AstraComActor::beforeMeasurements(int)
 {
 }

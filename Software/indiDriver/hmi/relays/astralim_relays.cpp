@@ -278,7 +278,7 @@ void AstrAlimRelays::updateSwitchStates()
 
 void AstrAlimRelays::readINA219()
 {
-    const int addresses[3] = {INA_DC1_ADDR, INA_DC2_ADDR, INA_DC3_ADDR};
+    static constexpr const char* relayProfiles[3] = { "AstraDc1", "AstraDc2", "AstraDc3" };
 
     double totalCurrent = 0;
     double totalPower = 0;
@@ -293,9 +293,15 @@ void AstrAlimRelays::readINA219()
         try
         {
             if (!inaSensors[i])
-                inaSensors[i] = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, addresses[i], "", false);
+                inaSensors[i] = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, -1, relayProfiles[i], true);
 
-            valid = inaSensors[i]->readSample(POLLING_MS / 1000.0, voltageV, currentA, powerW);
+            valid = inaSensors[i]->getPingOK() && (inaSensors[i]->intPeriodS() > 0.0);
+            if (valid)
+            {
+                voltageV = std::max(0.0, inaSensors[i]->voltageV());
+                currentA = std::max(0.0, inaSensors[i]->currentA());
+                powerW = std::max(0.0, inaSensors[i]->powerW());
+            }
         }
         catch (const std::exception&)
         {

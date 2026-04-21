@@ -27,7 +27,7 @@
 namespace AstrAlim {
 class GpioController;
 class AstraIna;
-class Bme280;
+class AstraStepPwmActor;
 }
 
 class AstrAlimHeater : public INDI::DefaultDevice
@@ -56,13 +56,10 @@ private:
     bool initPWM();
     void closePWM();
     bool setPWMDuty(int channel, double percent);
-    void runStepPwmLoop();
-    std::array<bool, 10> buildStepPattern(double percent) const;
     
     // Temperature sensors
     bool readDS18B20Sensors();
     bool readBME280();
-    double calculateDewPoint(double temp, double humidity);
     std::vector<std::string> scanDS18B20Devices();
     double readDS18B20Temperature(const std::string& sensorId);
     void updateSensorStatusList(bool rescanDevices = true);
@@ -71,11 +68,13 @@ private:
     bool autoDetectSensor(int heaterChannel);
     void handleAutoDetect(int heaterChannel);
     bool testSensorResponse(int heaterChannel, const std::string& sensorId);
-    double filterDewPoint(double newDewPoint);  // Filtre passe-bas pour le point de rosée
-    double filterValue(double newValue, std::vector<double>& history, double minChange);  // Filtre générique pour temp/humidité
     
     // Power monitoring
     void readINA219();
+    bool initRelays();
+    void shutdownRelays();
+    bool setRelay(int relayIndex, bool on);
+    void updateRelaySwitchStates();
     void resetINADisplayState();
     bool resetINAChannel(int channel);
     void applyINAChannelSample(int channel, bool validSample, bool currentValid, double sampleVoltage, double sampleCurrent, bool heaterActive);
@@ -90,13 +89,7 @@ private:
     static constexpr int STEP_PWM_GPIO_H1 = 18; // AstraPwm1
     static constexpr int STEP_PWM_GPIO_H2 = 13; // AstraPwm2
     std::unique_ptr<AstrAlim::GpioController> pwmGpio;
-    std::array<double, 2> pwmDutyPercent = {0.0, 0.0};
-    std::array<std::array<bool, STEP_PWM_STEP_COUNT>, 2> pwmStepPattern = {};
-    std::thread pwmStepThread;
-    std::atomic<bool> pwmStepRunning {false};
-    std::mutex pwmStepMutex;
-    std::condition_variable pwmStepCv;
-    int pwmStepIndex = 0;
+    std::array<std::unique_ptr<AstrAlim::AstraStepPwmActor>, 2> pwmActors;
     
     // PID state
     double pidIntegral[2] = {0, 0};
@@ -107,18 +100,6 @@ private:
     // DS18B20 sensor paths
     std::string ds18b20Path[2];
     std::vector<std::string> availableDS18B20;
-    std::unique_ptr<AstrAlim::Bme280> ambientBmeSensor;
-    
-    // Dew point filtering (moving average with minimum change threshold)
-    static constexpr int DEW_POINT_FILTER_SIZE = 10;  // Nombre de valeurs pour la moyenne mobile (augmenté pour plus de stabilité)
-    static constexpr double DEW_POINT_MIN_CHANGE = 0.1;  // Variation minimale requise pour mettre à jour (0.1°C)
-    static constexpr double TEMP_HUMIDITY_MIN_CHANGE = 0.05;  // Variation minimale pour temp/humidité (0.05°C ou 0.5%)
-    std::vector<double> dewPointHistory;  // Historique des points de rosée
-    std::vector<double> tempHistory;  // Historique des températures ambiantes
-    std::vector<double> humidityHistory;  // Historique des humidités
-    double filteredDewPoint;  // Point de rosée filtré
-    double filteredTemp;  // Température ambiante filtrée
-    double filteredHumidity;  // Humidité filtrée
     
     // Sensor assignment state
     struct SensorAssignState {
@@ -142,8 +123,8 @@ private:
     INDI::PropertyNumber Heater1TempNP {1};      // Current temperature from DS18B20
     INDI::PropertyNumber Heater1PowerNP {1};     // Current PWM duty cycle (0-100%)
     INDI::PropertyNumber Heater1SetpointNP {1};  // Target temperature or delta
-    INDI::PropertySwitch Heater1ModeSP {3};      // Off / Manual / Auto
-    enum { MODE_OFF, MODE_MANUAL, MODE_AUTO };
+    INDI::PropertySwitch Heater1ModeSP {4};      // Off / Power / Setpoint / Auto Dew
+    enum { MODE_OFF, MODE_POWER, MODE_SETPOINT, MODE_AUTO_DEW };
     INDI::PropertyText Heater1SensorTP {1};      // Associated DS18B20 sensor ID
     INDI::PropertySwitch Heater1SensorAssignSP {3};  // Auto-Detect / Test / Clear
     enum { SENSOR_ASSIGN_AUTO, SENSOR_ASSIGN_TEST, SENSOR_ASSIGN_CLEAR };
@@ -152,7 +133,7 @@ private:
     INDI::PropertyNumber Heater2TempNP {1};
     INDI::PropertyNumber Heater2PowerNP {1};
     INDI::PropertyNumber Heater2SetpointNP {1};
-    INDI::PropertySwitch Heater2ModeSP {3};
+    INDI::PropertySwitch Heater2ModeSP {4};
     INDI::PropertyText Heater2SensorTP {1};
     INDI::PropertySwitch Heater2SensorAssignSP {3};  // Auto-Detect / Test / Clear
     
@@ -168,11 +149,31 @@ private:
     // Dew point delta (target = dewpoint + delta)
     INDI::PropertyNumber DewDeltaNP {1};
     
-    // Power monitoring (if INA219 available)
-    INDI::PropertyNumber PowerMonitorNP {4};
-    enum { PWR_VOLTAGE1, PWR_CURRENT1, PWR_VOLTAGE2, PWR_CURRENT2 };
+    // Heater INA monitoring (split by heater, same presentation as DC blocks)
+    INDI::PropertyNumber HeaterPower1NP {3};
+    INDI::PropertyNumber HeaterPower2NP {3};
+    enum { HEATER_PWR_VOLTAGE, HEATER_PWR_CURRENT, HEATER_PWR_POWER };
+
+    // Relay controls (merged from relays driver)
+    INDI::PropertySwitch ActiveStateSP {2};
+    enum { RELAY_STATE_LOW, RELAY_STATE_HIGH };
+    INDI::PropertyNumber BCMPinsNP {3};
+    INDI::PropertySwitch Relay1SP {2};
+    INDI::PropertySwitch Relay2SP {2};
+    INDI::PropertySwitch Relay3SP {2};
+    enum { RELAY_SW_OFF, RELAY_SW_ON };
+    INDI::PropertyNumber RelayPowerDC1NP {3};
+    INDI::PropertyNumber RelayPowerDC2NP {3};
+    INDI::PropertyNumber RelayPowerDC3NP {3};
+    INDI::PropertyNumber RelayTotalPowerNP {2};
+    enum { RELAY_PWR_VOLTAGE, RELAY_PWR_CURRENT, RELAY_PWR_POWER };
+    int activeState = 1;  // 0 = active low, 1 = active high
+    std::array<int, 3> relayGpioState = {0, 0, 0};
+    std::array<std::unique_ptr<AstrAlim::AstraIna>, 3> relayInaSensors;
+    double relayTotalEnergyWh = 0.0;
     std::array<double, 2> inaDisplayVoltage = {0.0, 0.0};
     std::array<double, 2> inaDisplayCurrent = {0.0, 0.0};
+    std::array<double, 2> inaDisplayPower = {0.0, 0.0};
     std::array<bool, 2> inaHasSample = {false, false};
     std::array<int, 2> inaInvalidCount = {0, 0};
     std::array<int, 2> inaZeroWhileActiveCount = {0, 0};
@@ -196,6 +197,9 @@ private:
     static constexpr int INA_RESET_COOLDOWN_MS = 5000;
     static constexpr int INA_ADDR_H1 = 0x4d;
     static constexpr int INA_ADDR_H2 = 0x49;
+    static constexpr int INA_RELAY_DC1_ADDR = 0x41;
+    static constexpr int INA_RELAY_DC2_ADDR = 0x44;
+    static constexpr int INA_RELAY_DC3_ADDR = 0x46;
     static constexpr double DEFAULT_KP = 2.0;
     static constexpr double DEFAULT_KI = 0.1;
     static constexpr double DEFAULT_KD = 0.5;

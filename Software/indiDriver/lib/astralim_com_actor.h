@@ -12,7 +12,7 @@ class AstraComActor
 {
 public:
     explicit AstraComActor(std::string name = "");
-    virtual ~AstraComActor() = default;
+    virtual ~AstraComActor();
 
     virtual void beforeMeasurements(int step);
 

@@ -56,7 +56,6 @@ public:
     void onCycleConfigurationChanged(double periodS, int stepCount) override;
 
     bool getPingOK() const;
-    bool readSample(double integrationDurationS, double& outVoltageV, double& outCurrentA, double& outPowerW);
 
     void configure(Ina219::VoltageRange voltageRange = Ina219::RANGE_16V,
                    int gain = Ina219::GAIN_AUTO,
