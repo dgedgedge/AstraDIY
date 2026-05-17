@@ -2,7 +2,6 @@
 #define ASTRALIM_ASTRA_INA_H
 
 #include "astralim_com_device.h"
-#include "astralim_ina219.h"
 
 #include <map>
 #include <memory>
@@ -15,6 +14,36 @@ namespace AstrAlim
 class AstraIna : public AstraComDevice
 {
 public:
+    enum VoltageRange
+    {
+        RANGE_16V = 0,
+        RANGE_32V = 1,
+    };
+
+    enum Gain
+    {
+        GAIN_1_40MV = 0,
+        GAIN_2_80MV = 1,
+        GAIN_4_160MV = 2,
+        GAIN_8_320MV = 3,
+        GAIN_AUTO = -1,
+    };
+
+    enum AdcResolution
+    {
+        ADC_9BIT = 0,
+        ADC_10BIT = 1,
+        ADC_11BIT = 2,
+        ADC_12BIT = 3,
+        ADC_2SAMP = 9,
+        ADC_4SAMP = 10,
+        ADC_8SAMP = 11,
+        ADC_16SAMP = 12,
+        ADC_32SAMP = 13,
+        ADC_64SAMP = 14,
+        ADC_128SAMP = 15,
+    };
+
     struct Info
     {
         std::string name;
@@ -36,20 +65,26 @@ public:
         double shuntOhms = 0.01;
         double maxExpectedAmps = 6.0;
         bool forceAbsCurrentPower = false;
-        Ina219::AdcResolution busAdc = Ina219::ADC_12BIT;
-        Ina219::AdcResolution shuntAdc = Ina219::ADC_12BIT;
+        AdcResolution busAdc = ADC_12BIT;
+        AdcResolution shuntAdc = ADC_12BIT;
     };
 
     static const std::map<std::string, SensorConfig>& sensorSet();
     static std::vector<std::string> getListNames();
     static void exitAll();
 
-    AstraIna(double shuntOhms = -1.0,
-             double maxExpectedAmps = -1.0,
-             int busNum = -1,
-             int address = -1,
-             const std::string& name = "",
+    // Constructor using predefined sensor name (e.g., "AstraPwm1", "AstraDc1")
+    explicit AstraIna(const std::string& name, bool autoRegisterToFetcher = true);
+
+    // Constructor using individual sensor characteristics
+    AstraIna(double shuntOhms,
+             double maxExpectedAmps,
+             int busNum,
+             int address,
+             const std::string& name = "AstraIna",
              bool autoRegisterToFetcher = true);
+
+    ~AstraIna();
 
     void startMeasurement(int step, double integrationDurationS) override;
     void getMeasurement(int step, double integrationDurationS) override;
@@ -57,10 +92,10 @@ public:
 
     bool getPingOK() const;
 
-    void configure(Ina219::VoltageRange voltageRange = Ina219::RANGE_16V,
-                   int gain = Ina219::GAIN_AUTO,
-                   Ina219::AdcResolution busAdc = Ina219::ADC_12BIT,
-                   Ina219::AdcResolution shuntAdc = Ina219::ADC_12BIT);
+    void configure(VoltageRange voltageRange = RANGE_16V,
+                   int gain = GAIN_AUTO,
+                   AdcResolution busAdc = ADC_12BIT,
+                   AdcResolution shuntAdc = ADC_12BIT);
 
     double voltageV() const;
     double shuntVoltagemV() const;
@@ -75,10 +110,13 @@ public:
     Info getInfo() const;
 
 private:
+    struct Impl;
+
     static constexpr int MIN_VALID_SAMPLES_ABS = 3;
     static constexpr double MIN_VALID_SAMPLES_RATIO = 0.40;
     static constexpr double PUBLISH_SMOOTH_ALPHA = 0.35;
 
+    void initializeFromConfig(const SensorConfig& cfg);
     void resetCycleAccumulators();
     void publishCurrentCycleAverage();
     void accumulateCycleAndPublish(int step);
@@ -90,10 +128,10 @@ private:
     bool pingOk = true;
 
     int address = -1;
-    Ina219::VoltageRange voltageRange = Ina219::RANGE_16V;
-    int gain = Ina219::GAIN_AUTO;
-    Ina219::AdcResolution busAdc = Ina219::ADC_12BIT;
-    Ina219::AdcResolution shuntAdc = Ina219::ADC_12BIT;
+    VoltageRange voltageRange = RANGE_16V;
+    int gain = GAIN_AUTO;
+    AdcResolution busAdc = ADC_12BIT;
+    AdcResolution shuntAdc = ADC_12BIT;
     bool forceAbsCurrentPower = false;
 
     double integrationPeriodS = 0.0;
@@ -114,7 +152,7 @@ private:
     double cyclePowerSummW = 0.0;
     int cycleSampleCount = 0;
 
-    std::unique_ptr<Ina219> ina;
+    std::unique_ptr<Impl> impl;
 };
 
 } // namespace AstrAlim

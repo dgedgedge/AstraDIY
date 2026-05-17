@@ -1,7 +1,7 @@
 #ifndef ASTRALIM_BME_FETCHER_H
 #define ASTRALIM_BME_FETCHER_H
 
-#include "astralim_bme280.h"
+#include "internal/astralim_bme280.h"
 #include "astralim_com_device.h"
 
 #include <memory>

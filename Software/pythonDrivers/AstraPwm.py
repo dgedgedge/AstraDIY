@@ -214,8 +214,15 @@ class AstraPwm():
     def unset_asservTempRosee(self) -> None:
         self.asservTempRosee = False
 
-    def set_deltaTempRosee(self, deltaTempRosee: float) -> None:
+    def get_default_kp_from_deltaTempRosee(self) -> float:
+        if self.dewPointMarginC > 0:
+            return 100.0 / self.dewPointMarginC
+        return 0.0
+
+    def set_deltaTempRosee(self, deltaTempRosee: float, apply_default_pid: bool = False) -> None:
         self.dewPointMarginC = deltaTempRosee
+        if apply_default_pid:
+            self.setDefaultKpKiKd()
 
     def updateCmdTempfromTempRosee(self) -> None:
         """Met à jour la consigne à partir du point de rosée si ce mode est actif."""
@@ -266,10 +273,7 @@ class AstraPwm():
         - Ki = 0
         - Kd = 0
         """
-        if self.dewPointMarginC > 0:
-            self.Kp = 100.0 / self.dewPointMarginC
-        else:
-            self.Kp = 0.0
+        self.Kp = self.get_default_kp_from_deltaTempRosee()
         self.Ki = 0.0
         self.Kd = 0.0
 

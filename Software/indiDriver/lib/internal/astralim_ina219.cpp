@@ -1,4 +1,4 @@
-#include "astralim_ina219.h"
+#include "internal/astralim_ina219.h"
 
 #include <algorithm>
 #include <array>

@@ -2,11 +2,15 @@
 
 #include "astralim_com_actor.h"
 #include "astralim_com_device.h"
+#if !defined(ASTRA_FETCHER_USE_STDOUT_LOG)
+#include <indilogger.h>
+#endif
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
@@ -20,6 +24,67 @@ namespace AstrAlim
 
 namespace
 {
+#if defined(ASTRA_FETCHER_USE_STDOUT_LOG)
+bool isDebugEnabledFromEnv()
+{
+    const char* debugValue = std::getenv("ASTRA_DRIVER_DEBUG");
+    if (debugValue == nullptr)
+        debugValue = std::getenv("INDI_DEBUG");
+
+    if (debugValue == nullptr)
+        return false;
+
+    return std::strcmp(debugValue, "1") == 0 ||
+           std::strcmp(debugValue, "true") == 0 ||
+           std::strcmp(debugValue, "TRUE") == 0 ||
+           std::strcmp(debugValue, "yes") == 0 ||
+           std::strcmp(debugValue, "YES") == 0 ||
+           std::strcmp(debugValue, "on") == 0 ||
+           std::strcmp(debugValue, "ON") == 0;
+}
+#endif
+
+void debugActivation(const char* phase, int step, const std::string& name, double integrationS)
+{
+#if !defined(ASTRA_FETCHER_USE_STDOUT_LOG)
+    DEBUGFDEVICE("AstraComFetcher", INDI::Logger::DBG_DEBUG,
+                 "%s step=%d name=%s integration=%.3fs",
+                 phase, step, name.c_str(), integrationS);
+#else
+    if (!isDebugEnabledFromEnv())
+        return;
+
+    std::cout << "[DEBUG AstraComFetcher] "
+              << phase
+              << " step=" << step
+              << " name=" << name
+              << " integration=" << integrationS << "s"
+              << std::endl;
+#endif
+}
+
+void debugCycleConfiguration(double periodValue, int stepCountValue, size_t deviceCount, size_t actorCount)
+{
+#if !defined(ASTRA_FETCHER_USE_STDOUT_LOG)
+    DEBUGFDEVICE("AstraComFetcher", INDI::Logger::DBG_DEBUG,
+                 "Cycle configuration changed: period=%.3fs steps=%d devices=%zu actors=%zu",
+                 periodValue, stepCountValue, deviceCount, actorCount);
+#else
+    if (!isDebugEnabledFromEnv())
+        return;
+
+    std::cout << "[DEBUG AstraComFetcher] Cycle configuration changed: period="
+              << periodValue
+              << "s steps="
+              << stepCountValue
+              << " devices="
+              << deviceCount
+              << " actors="
+              << actorCount
+              << std::endl;
+#endif
+}
+
 double monotonicNowSeconds()
 {
     using Clock = std::chrono::steady_clock;
@@ -364,15 +429,7 @@ void AstraComFetcher::notifyCycleConfigurationChanged()
         }
     }
 
-    std::cout << "[DEBUG AstraComFetcher] Cycle configuration changed: period="
-              << periodValue
-              << "s steps="
-              << stepCountValue
-              << " devices="
-              << devicesSnapshot.size()
-              << " actors="
-              << actorsSnapshot.size()
-              << std::endl;
+    debugCycleConfiguration(periodValue, stepCountValue, devicesSnapshot.size(), actorsSnapshot.size());
 }
 
 void AstraComFetcher::reassignStepIndexedDevicesNoLock()
@@ -497,7 +554,10 @@ void AstraComFetcher::run()
                 try
                 {
                     if (actor)
+                    {
+                        debugActivation("actor.beforeMeasurements", cycleStep, actor->getName(), 0.0);
                         actor->beforeMeasurements(cycleStep);
+                    }
                 }
                 catch (...)
                 {
@@ -517,7 +577,10 @@ void AstraComFetcher::run()
                 try
                 {
                     if (device)
+                    {
+                        debugActivation("device.startMeasurement eachStep", cycleStep, device->getName(), stepIntegrationDurationS);
                         device->startMeasurement(cycleStep, stepIntegrationDurationS);
+                    }
                 }
                 catch (...)
                 {
@@ -528,7 +591,10 @@ void AstraComFetcher::run()
                 try
                 {
                     if (device)
+                    {
+                        debugActivation("device.startMeasurement stepped", cycleStep, device->getName(), cycleIntegrationDurationS);
                         device->startMeasurement(cycleStep, cycleIntegrationDurationS);
+                    }
                 }
                 catch (...)
                 {
@@ -542,7 +608,10 @@ void AstraComFetcher::run()
                 try
                 {
                     if (device)
+                    {
+                        debugActivation("device.getMeasurement eachStep", cycleStep, device->getName(), stepIntegrationDurationS);
                         device->getMeasurement(cycleStep, stepIntegrationDurationS);
+                    }
                 }
                 catch (...)
                 {
@@ -553,7 +622,10 @@ void AstraComFetcher::run()
                 try
                 {
                     if (device)
+                    {
+                        debugActivation("device.getMeasurement stepped", cycleStep, device->getName(), cycleIntegrationDurationS);
                         device->getMeasurement(cycleStep, cycleIntegrationDurationS);
+                    }
                 }
                 catch (...)
                 {

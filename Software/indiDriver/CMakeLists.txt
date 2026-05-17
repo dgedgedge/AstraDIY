@@ -41,7 +41,7 @@ set(gpio_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_gpio.cpp)
 
 # Shared INDI common library sources
 set(indi_common_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_ina219.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/internal/astralim_ina219.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_astra_ina.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_com_actor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_com_device.cpp
@@ -75,8 +75,8 @@ install(TARGETS indi_astralim_system RUNTIME DESTINATION bin)
 ################ AstrAlim Heater ################
 add_executable(indi_astralim_heater
     ${CMAKE_CURRENT_SOURCE_DIR}/hmi/heater/astralim_heater.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/hmi/heater/astralim_bme280.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/hmi/heater/astralim_bme_fetcher.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/internal/astralim_bme280.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_bme_fetcher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hmi/heater/astralim_step_pwm_actor.cpp
     ${indi_common_SRCS}
     ${gpio_SRCS}
@@ -91,6 +91,7 @@ add_executable(test_astra_com
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_com_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_com_fetcher.cpp
 )
+target_compile_definitions(test_astra_com PRIVATE ASTRA_FETCHER_USE_STDOUT_LOG=1)
 target_link_libraries(test_astra_com Threads::Threads)
 set_target_properties(test_astra_com PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tools/build
@@ -115,6 +116,7 @@ add_executable(test_astra_step_pwm
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_com_fetcher.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/lib/astralim_gpio.cpp
 )
+target_compile_definitions(test_astra_step_pwm PRIVATE ASTRA_FETCHER_USE_STDOUT_LOG=1)
 target_link_libraries(test_astra_step_pwm ${GPIOD_LIBRARIES} Threads::Threads)
 set_target_properties(test_astra_step_pwm PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tools/build

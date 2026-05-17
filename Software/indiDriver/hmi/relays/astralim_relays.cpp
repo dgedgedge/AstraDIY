@@ -293,7 +293,7 @@ void AstrAlimRelays::readINA219()
         try
         {
             if (!inaSensors[i])
-                inaSensors[i] = std::make_unique<AstrAlim::AstraIna>(0.01, 6.0, 1, -1, relayProfiles[i], true);
+                inaSensors[i] = std::make_unique<AstrAlim::AstraIna>(relayProfiles[i], true);
 
             valid = inaSensors[i]->getPingOK() && (inaSensors[i]->intPeriodS() > 0.0);
             if (valid)

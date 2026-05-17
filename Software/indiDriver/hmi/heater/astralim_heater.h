@@ -76,8 +76,6 @@ private:
     bool setRelay(int relayIndex, bool on);
     void updateRelaySwitchStates();
     void resetINADisplayState();
-    bool resetINAChannel(int channel);
-    void applyINAChannelSample(int channel, bool validSample, bool currentValid, double sampleVoltage, double sampleCurrent, bool heaterActive);
     
     // PID control
     void runPIDControl(int channel);
@@ -170,7 +168,6 @@ private:
     int activeState = 1;  // 0 = active low, 1 = active high
     std::array<int, 3> relayGpioState = {0, 0, 0};
     std::array<std::unique_ptr<AstrAlim::AstraIna>, 3> relayInaSensors;
-    double relayTotalEnergyWh = 0.0;
     std::array<double, 2> inaDisplayVoltage = {0.0, 0.0};
     std::array<double, 2> inaDisplayCurrent = {0.0, 0.0};
     std::array<double, 2> inaDisplayPower = {0.0, 0.0};
@@ -184,6 +181,19 @@ private:
     std::array<std::chrono::steady_clock::time_point, 2> inaLastResetAttempt {};
     std::array<std::unique_ptr<AstrAlim::AstraIna>, 2> inaSensors;
 
+    struct InaEntry
+    {
+        const char* name = "";
+        std::unique_ptr<AstrAlim::AstraIna>* sensor = nullptr;
+        INDI::PropertyNumber* outputProperty = nullptr;
+        decltype(std::addressof(HeaterPower1NP[0])) voltageField = nullptr;
+        decltype(std::addressof(HeaterPower1NP[0])) currentField = nullptr;
+        decltype(std::addressof(HeaterPower1NP[0])) powerField = nullptr;
+        bool isRelay = false;
+        int heaterDisplayIndex = -1;
+    };
+    std::array<InaEntry, 5> inaEntries;
+
     // Constants
     static constexpr int POLL_INTERVAL_MS = 5000;
     static constexpr int SENSOR_LIST_UPDATE_INTERVAL_CYCLES = 6;  // 30s with 5s poll
@@ -195,15 +205,10 @@ private:
     static constexpr int INA_LOG_REPEAT_CYCLES = 6;
     static constexpr int INA_NO_RESPONSE_RESET_DELAY_MS = 5000;
     static constexpr int INA_RESET_COOLDOWN_MS = 5000;
-    static constexpr int INA_ADDR_H1 = 0x4d;
-    static constexpr int INA_ADDR_H2 = 0x49;
-    static constexpr int INA_RELAY_DC1_ADDR = 0x41;
-    static constexpr int INA_RELAY_DC2_ADDR = 0x44;
-    static constexpr int INA_RELAY_DC3_ADDR = 0x46;
-    static constexpr double DEFAULT_KP = 2.0;
+    static constexpr double DEFAULT_DEW_POINT_MARGIN = 2.0;
+    static constexpr double DEFAULT_KP = 100.0 / DEFAULT_DEW_POINT_MARGIN; // Kp = 100 / marge
     static constexpr double DEFAULT_KI = 0.1;
     static constexpr double DEFAULT_KD = 0.5;
-    static constexpr double DEFAULT_DEW_DELTA = 2.0;
     static constexpr double TEMP_UNAVAILABLE = 100.0;
     static constexpr double DEWPOINT_UNAVAILABLE = -100.0;
 };

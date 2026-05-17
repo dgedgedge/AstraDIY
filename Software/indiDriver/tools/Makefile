@@ -9,7 +9,7 @@ COM_TARGET := $(BIN_DIR)/test_astra_com
 ONEWIRE_TARGET := $(BIN_DIR)/test_astra_1wire
 STEPPWM_TARGET := $(BIN_DIR)/test_astra_step_pwm
 
-BME_SRC := test_bme280.cpp ../astralim_bme280.cpp
+BME_SRC := test_bme280.cpp ../lib/internal/astralim_bme280.cpp
 COM_SRC := test_astra_com.cpp ../astralim_com_actor.cpp ../astralim_com_device.cpp ../astralim_com_fetcher.cpp
 ONEWIRE_SRC := test_astra_1wire.cpp ../astralim_1wire_temp_fetcher.cpp
 STEPPWM_SRC := test_astra_step_pwm.cpp ../astralim_step_pwm_actor.cpp ../astralim_com_actor.cpp ../astralim_com_device.cpp ../astralim_com_fetcher.cpp ../astralim_gpio.cpp

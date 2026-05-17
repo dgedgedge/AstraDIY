@@ -1,4 +1,4 @@
-#include "astralim_bme280.h"
+#include "lib/internal/astralim_bme280.h"
 
 #include <chrono>
 #include <cstdlib>

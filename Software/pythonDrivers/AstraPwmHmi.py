@@ -150,7 +150,7 @@ class UnifiedChannelConfigDialog(QDialog):
             "La consigne automatique est calculée ainsi :<br>"
             "<b>Consigne = Point de rosée + marge</b><br><br>"
             "Le Kp par défaut est dérivé de cette marge pour obtenir 100 % de chauffe "
-            "lorsque l'erreur est suppérieur à cette marge :<br>"
+            "lorsque l'erreur est supérieur à cette marge :<br>"
             "<b>Kp_défaut = 100 / marge</b><br><br>"
             "Exemple : avec une marge de 2.0°C, le Kp par défaut vaut 50."
         )
@@ -288,18 +288,18 @@ class UnifiedChannelConfigDialog(QDialog):
     def onDewPointMarginChanged(self, value: float) -> None:
         """Applique la marge de rosée et resynchronise Kp en mode manuel."""
         if not self.auto_toggle.isChecked():
-            defaultKp = 0.0 if value <= 0.0 else 100.0 / value
+            defaultKp = self.reference_astra_drew.get_default_kp_from_deltaTempRosee() if self.reference_astra_drew else (0.0 if value <= 0.0 else 100.0 / value)
             self.kp_spin.setValue(defaultKp)
         
         if self.widget:
-            self.widget.AstraDrew.set_deltaTempRosee(value)
+            self.widget.AstraDrew.set_deltaTempRosee(value, apply_default_pid=not self.auto_toggle.isChecked())
             if not self.auto_toggle.isChecked():
-                self.widget.AstraDrew.Kp = self.kp_spin.value()
+                self.widget.AstraDrew.set_kp(self.kp_spin.value())
     
     def reset_to_defaults(self):
         """Réinitialise les paramètres PID aux valeurs par défaut."""
         if self.reference_astra_drew:
-            self.reference_astra_drew.set_deltaTempRosee(self.dew_margin_spin.value())
+            self.reference_astra_drew.set_deltaTempRosee(self.dew_margin_spin.value(), apply_default_pid=True)
             self.reference_astra_drew.setDefaultKpKiKd()
             self.reference_astra_drew.unset_autoUpdateKpKiKd()
             self.kp_spin.setValue(self.reference_astra_drew.get_Kp())
@@ -324,8 +324,10 @@ class UnifiedChannelConfigDialog(QDialog):
             dewPointMarginC = self.dew_margin_spin.value()
             auto = self.auto_toggle.isChecked()
             
-            self.widget.AstraDrew.set_deltaTempRosee(dewPointMarginC)
-            self.widget.AstraDrew.Kp, self.widget.AstraDrew.Ki, self.widget.AstraDrew.Kd = kp, ki, kd
+            self.widget.AstraDrew.set_deltaTempRosee(dewPointMarginC, apply_default_pid=not auto)
+            self.widget.AstraDrew.set_kp(kp)
+            self.widget.AstraDrew.set_Ki(ki)
+            self.widget.AstraDrew.set_Kd(kd)
             if auto:
                 self.widget.AstraDrew.set_autoUpdateKpKiKd()
             else:
@@ -403,7 +405,7 @@ class PIDConfigDialog(QDialog):
             "La consigne automatique est calculée ainsi :<br>"
             "<b>Consigne = Point de rosée + marge</b><br><br>"
             "Le Kp par défaut est dérivé de cette marge pour obtenir 100 % de chauffe "
-            "lorsque l'erreur est égale à cette marge :<br>"
+            "lorsque l'erreur est supérieur à cette marge :<br>"
             "<b>Kp_défaut = 100 / marge</b><br><br>"
             "Exemple : avec une marge de 2.0°C, le Kp par défaut vaut 50."
         )
@@ -559,17 +561,17 @@ class PIDConfigDialog(QDialog):
     def onDewPointMarginChanged(self, value: float) -> None:
         """Applique la marge de rosée et resynchronise Kp en mode manuel."""
         if not self.auto_toggle.isChecked():
-            defaultKp = 0.0 if value <= 0.0 else 100.0 / value
+            defaultKp = self.reference_astra_drew.get_default_kp_from_deltaTempRosee() if self.reference_astra_drew else (0.0 if value <= 0.0 else 100.0 / value)
             self.kp_spin.setValue(defaultKp)
 
         if self.widget:
-            self.widget.AstraDrew.set_deltaTempRosee(value)
+            self.widget.AstraDrew.set_deltaTempRosee(value, apply_default_pid=not self.auto_toggle.isChecked())
             if not self.auto_toggle.isChecked():
-                self.widget.AstraDrew.Kp = self.kp_spin.value()
+                self.widget.AstraDrew.set_kp(self.kp_spin.value())
 
     def reset_to_defaults(self):
         if self.reference_astra_drew:
-            self.reference_astra_drew.set_deltaTempRosee(self.dew_margin_spin.value())
+            self.reference_astra_drew.set_deltaTempRosee(self.dew_margin_spin.value(), apply_default_pid=True)
             self.reference_astra_drew.setDefaultKpKiKd()
             self.reference_astra_drew.unset_autoUpdateKpKiKd()  # Réinitialiser l'auto-ajustement
             self.kp_spin.setValue(self.reference_astra_drew.get_Kp())
@@ -587,8 +589,10 @@ class PIDConfigDialog(QDialog):
         dewPointMarginC = self.dew_margin_spin.value()
         auto = self.auto_toggle.isChecked()
         if self.widget:
-            self.widget.AstraDrew.set_deltaTempRosee(dewPointMarginC)
-            self.widget.AstraDrew.Kp, self.widget.AstraDrew.Ki, self.widget.AstraDrew.Kd = kp, ki, kd
+            self.widget.AstraDrew.set_deltaTempRosee(dewPointMarginC, apply_default_pid=not auto)
+            self.widget.AstraDrew.set_kp(kp)
+            self.widget.AstraDrew.set_Ki(ki)
+            self.widget.AstraDrew.set_Kd(kd)
             if auto:
                 self.widget.AstraDrew.set_autoUpdateKpKiKd()
             else:

@@ -1,6 +1,7 @@
 #include "astralim_astra_ina.h"
 
 #include "astralim_com_fetcher.h"
+#include "internal/astralim_ina219.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,16 +10,31 @@
 namespace AstrAlim
 {
 
+struct AstraIna::Impl
+{
+    std::unique_ptr<Ina219> ina;
+};
+
 namespace
 {
 const std::map<std::string, AstraIna::SensorConfig> kSensorSet {
-    {"AstraDc1", {false, 1, 0x41, 0.01, 6.0, true, Ina219::ADC_12BIT, Ina219::ADC_12BIT}},
-    {"AstraDc2", {false, 1, 0x44, 0.01, 6.0, true, Ina219::ADC_12BIT, Ina219::ADC_12BIT}},
-    {"AstraDc3", {false, 1, 0x46, 0.01, 6.0, true, Ina219::ADC_12BIT, Ina219::ADC_12BIT}},
-    {"AstraPwm1", {true, 1, 0x49, 0.01, 6.0, false, Ina219::ADC_12BIT, Ina219::ADC_12BIT}},
-    {"AstraPwm2", {true, 1, 0x4d, 0.01, 6.0, false, Ina219::ADC_12BIT, Ina219::ADC_12BIT}},
-    {"AstOnStep", {false, 1, 0x40, 0.005, 6.0, false, Ina219::ADC_12BIT, Ina219::ADC_12BIT}},
+    {"AstraDc1", {false, 1, 0x41, 0.01, 6.0, true, AstraIna::ADC_12BIT, AstraIna::ADC_12BIT}},
+    {"AstraDc2", {false, 1, 0x44, 0.01, 6.0, true, AstraIna::ADC_12BIT, AstraIna::ADC_12BIT}},
+    {"AstraDc3", {false, 1, 0x46, 0.01, 6.0, true, AstraIna::ADC_12BIT, AstraIna::ADC_12BIT}},
+    {"AstraPwm2", {true, 1, 0x49, 0.01, 6.0, false, AstraIna::ADC_12BIT, AstraIna::ADC_12BIT}},
+    {"AstraPwm1", {true, 1, 0x4d, 0.01, 6.0, false, AstraIna::ADC_12BIT, AstraIna::ADC_12BIT}},
+    {"AstOnStep", {false, 1, 0x40, 0.005, 6.0, false, AstraIna::ADC_12BIT, AstraIna::ADC_12BIT}},
 };
+
+Ina219::VoltageRange toInaVoltageRange(AstraIna::VoltageRange range)
+{
+    return static_cast<Ina219::VoltageRange>(range);
+}
+
+Ina219::AdcResolution toInaAdcResolution(AstraIna::AdcResolution adc)
+{
+    return static_cast<Ina219::AdcResolution>(adc);
+}
 }
 
 const std::map<std::string, AstraIna::SensorConfig>& AstraIna::sensorSet()
@@ -40,42 +56,56 @@ void AstraIna::exitAll()
     AstraComFetcher::exitAll();
 }
 
+AstraIna::AstraIna(const std::string& name, bool autoRegisterToFetcher)
+        : AstraComDevice(false, name, false),
+            impl(std::make_unique<Impl>())
+{
+    const auto it = kSensorSet.find(name);
+    if (it == kSensorSet.end())
+        throw std::runtime_error("Unknown AstraIna profile: " + name);
+
+    initializeFromConfig(it->second);
+
+    if (autoRegisterToFetcher)
+        registerToFetcher(nullptr, it->second.isPwm);
+}
+
 AstraIna::AstraIna(double shuntOhms,
                    double maxExpectedAmps,
                    int busNum,
                    int addressValue,
                    const std::string& name,
                    bool autoRegisterToFetcher)
-    : AstraComDevice(false, name.empty() ? "AstraIna" : name, autoRegisterToFetcher)
+        : AstraComDevice(false, name, false),
+            impl(std::make_unique<Impl>())
 {
+    if (shuntOhms <= 0.0 || maxExpectedAmps <= 0.0 || busNum < 0 || addressValue < 0)
+        throw std::runtime_error("Invalid sensor parameters: shuntOhms/maxExpectedAmps/busNum/address must be positive");
+
     SensorConfig cfg;
+    cfg.shuntOhms = shuntOhms;
+    cfg.maxExpectedAmps = maxExpectedAmps;
+    cfg.busNum = busNum;
+    cfg.address = addressValue;
 
-    if (!name.empty())
-    {
-        const auto it = kSensorSet.find(name);
-        if (it == kSensorSet.end())
-            throw std::runtime_error("Unknown AstraIna profile: " + name);
-        cfg = it->second;
-    }
-    else
-    {
-        if (shuntOhms <= 0.0 || maxExpectedAmps <= 0.0 || busNum < 0 || addressValue < 0)
-            throw std::runtime_error("If name is empty, constructor needs shuntOhms/maxExpectedAmps/busNum/address");
+    initializeFromConfig(cfg);
 
-        cfg.shuntOhms = shuntOhms;
-        cfg.maxExpectedAmps = maxExpectedAmps;
-        cfg.busNum = busNum;
-        cfg.address = addressValue;
-    }
+    if (autoRegisterToFetcher)
+        registerToFetcher(nullptr, cfg.isPwm);
+}
 
+AstraIna::~AstraIna() = default;
+
+void AstraIna::initializeFromConfig(const SensorConfig& cfg)
+{
     eachStep = cfg.isPwm;
     isPwm = cfg.isPwm;
     forceAbsCurrentPower = cfg.forceAbsCurrentPower;
 
     address = cfg.address;
-    ina = std::make_unique<Ina219>(cfg.shuntOhms, cfg.maxExpectedAmps, cfg.busNum, cfg.address);
+    impl->ina = std::make_unique<Ina219>(cfg.shuntOhms, cfg.maxExpectedAmps, cfg.busNum, cfg.address);
 
-    configure(Ina219::RANGE_16V, Ina219::GAIN_AUTO, cfg.busAdc, cfg.shuntAdc);
+    configure(RANGE_16V, GAIN_AUTO, cfg.busAdc, cfg.shuntAdc);
 }
 
 void AstraIna::startMeasurement(int, double)
@@ -83,13 +113,13 @@ void AstraIna::startMeasurement(int, double)
     configurationSent = false;
     try
     {
-        if (!ina || !ina->ping())
+        if (!impl || !impl->ina || !impl->ina->ping())
         {
             pingOk = false;
             return;
         }
 
-        ina->configure(voltageRange, gain, busAdc, shuntAdc);
+        impl->ina->configure(toInaVoltageRange(voltageRange), gain, toInaAdcResolution(busAdc), toInaAdcResolution(shuntAdc));
         configurationSent = true;
         pingOk = true;
     }
@@ -107,17 +137,17 @@ bool AstraIna::getPingOK() const
 
 void AstraIna::getMeasurement(int step, double integrationDurationS)
 {
-    if (!configurationSent || !ina)
+    if (!configurationSent || !impl || !impl->ina)
         return;
 
     try
     {
-        if (!ina->currentOverflow())
+        if (!impl->ina->currentOverflow())
         {
-            const double rawShuntmV = ina->shuntMilliVolts();
-            const double rawVoltageV = ina->voltage();
-            const double rawCurrentmA = ina->currentMilliAmps();
-            const double rawPowermW = ina->powerMilliWatts();
+            const double rawShuntmV = impl->ina->shuntMilliVolts();
+            const double rawVoltageV = impl->ina->voltage();
+            const double rawCurrentmA = impl->ina->currentMilliAmps();
+            const double rawPowermW = impl->ina->powerMilliWatts();
 
             currentValuemA = forceAbsCurrentPower ? std::fabs(rawCurrentmA) : rawCurrentmA;
             powerValuemW = forceAbsCurrentPower ? std::fabs(rawPowermW) : rawPowermW;
@@ -211,10 +241,10 @@ void AstraIna::onCycleConfigurationChanged(double periodS, int stepCount)
     resetCycleAccumulators();
 }
 
-void AstraIna::configure(Ina219::VoltageRange voltageRangeValue,
+void AstraIna::configure(VoltageRange voltageRangeValue,
                          int gainValue,
-                         Ina219::AdcResolution busAdcValue,
-                         Ina219::AdcResolution shuntAdcValue)
+                         AdcResolution busAdcValue,
+                         AdcResolution shuntAdcValue)
 {
     if (configured)
         throw std::runtime_error("AstraIna already configured");
